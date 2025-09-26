@@ -129,6 +129,140 @@ if uploaded_file is not None:
         "Assistente": ["Assistências/90", "Assistências esperadas/90", "Passes chave/90"]
     }
 
+    # -------------------------------
+    # NOVO: Dicionário de Pesos para o Score (Ponderação)
+    # -------------------------------
+    # Define pesos de 1.0 (menos importante) a 3.0 (mais importante).
+    pesos_por_estilo = {
+        # ESTILOS GERAIS/REPETIDOS (Usados como fallback se não houver um estilo específico por posição)
+        "Construtor": {
+            "Passes certos, %": 3.0,
+            "Passes progressivos certos, %": 2.5,
+            "Passes progressivos/90": 1.5,
+            "Passes/90": 1.0,
+        },
+        "Assistente": {
+            "Assistências/90": 3.0,
+            "Passes chave/90": 2.5,
+            "Assistências esperadas/90": 2.0,
+            "Passes inteligentes certos, %": 1.5,
+        },
+        "Driblador": {
+            "Dribles com sucesso, %": 2.5,
+            "Dribles/90": 1.5,
+            "Acelerações/90": 1.0,
+        },
+        "Finalizador": {
+            "Golos/90": 3.0,
+            "Golos esperados/90": 2.5,
+            "Remates à baliza, %": 1.5,
+            "Remates/90": 1.0,
+        },
+
+        # Zagueiro
+        "Defensor": {
+            "Duelos defensivos ganhos, %": 3.0,
+            "Interseções/90": 2.5,
+            "Cortes/90": 2.0,
+            "Duelos defensivos/90": 1.0,
+            "Faltas/90": 1.0,
+        },
+        "Líder de Defesa": {
+            "Duelos aéreos ganhos, %": 3.0,
+            "Ações defensivas com êxito/90": 2.0,
+        },
+        "Lançador": {
+            "Passes longos certos, %": 3.0,
+            "Passes em profundidade certos, %": 2.5,
+            "Passes longos/90": 1.5,
+            "Passes em profundidade/90": 1.0,
+        },
+        
+        # Lateral
+        "Cruzador": {
+            "Cruzamentos certos, %": 3.0,
+            "Passes para a área de penálti/90": 2.0,
+            "Cruzamentos/90": 1.0,
+        },
+        "Desarme": {
+            "Duelos defensivos ganhos, %": 3.0,
+            "Interseções/90": 2.0,
+            "Duelos defensivos/90": 1.5,
+        },
+        
+        # Volante
+        "Recuperador": {
+            "Duelos defensivos ganhos, %": 3.0,
+            "Interseções/90": 2.5,
+            "Duelos defensivos/90": 1.5,
+            "Faltas/90": 1.0,
+        },
+        "Box-to-Box": {
+            "Corridas progressivas/90": 2.5,
+            "Interseções/90": 2.0,
+            "Duelos/90": 1.5,
+            "Acelerações/90": 1.0,
+        },
+        "Distribuidor": {
+            "Passes certos, %": 3.0,
+            "Passes curtos / médios precisos, %": 2.5,
+            "Passes curtos / médios /90": 1.5,
+        },
+
+        # Meia-Ofensivo
+        "Distribuidor": { # Sobrescrevendo o Distribuidor geral com foco ofensivo
+            "Passes para a frente certos, %": 3.0,
+            "Passes progressivos certos, %": 2.5,
+            "Passes para a frente/90": 1.5,
+            "Passes progressivos/90": 1.0,
+        },
+
+        # Extremo
+        "Acelerador": {
+            "Corridas progressivas/90": 2.5,
+            "Acelerações/90": 1.5,
+        },
+
+        # Centroavante
+        "Finalizador": {
+            "Golos/90": 3.0,
+            "Toques na área/90": 2.0,
+            "Remates à baliza, %": 1.5,
+            "Remates/90": 1.0,
+        },
+        "Pressionador": {
+            "Duelos defensivos ganhos, %": 3.0,
+            "Acções atacantes com sucesso/90": 2.0,
+            "Duelos defensivos/90": 1.0,
+        },
+        "Dominador Aéreo": {
+            "Golos de cabeça/90": 3.0,
+            "Duelos aéreos ganhos, %": 2.0,
+            "Duelos aéreos/90": 1.0,
+        },
+        "Movimentador": {
+            "Passes recebidos/90": 2.5,
+            "Corridas progressivas/90": 1.5,
+            "Acelerações/90": 1.0,
+        },
+        
+        # Goleiro
+        "Shot Stopper": {
+            "Defesas, %": 3.0,
+            "Golos expectáveis defendidos por 90´": 2.5,
+            "Golos sofridos/90": 1.0,
+        },
+        "Sweeper Keeper": {
+            "Saídas/90": 2.0,
+            "Duelos aéreos ganhos, %": 3.0,
+            "Duelos aéreos/90": 1.0,
+        },
+        "Distribuidor": {
+            "Passes certos, %": 3.0,
+            "Passes longos certos, %": 2.0,
+            "Passes para trás recebidos pelo guarda-redes/90": 1.0,
+        },
+    }
 
     # -------------------------------
     # KPIs fixos para o radar por posição
@@ -192,6 +326,7 @@ if uploaded_file is not None:
         }
     }
 
+
     # -------------------------------
     # Botão gerar análise
     # -------------------------------
@@ -214,15 +349,68 @@ if uploaded_file is not None:
                 st.warning("Nenhuma métrica válida encontrada no dataset.")
             else:
                 df_pos = df_filtrado.copy()
+                
+                # Métrica para ranqueamento invertido (quanto MENOR o valor, MELHOR a classificação)
+                # Ex: 'Golos sofridos/90', 'Faltas/90'
+                metricas_negativas = ["Golos sofridos/90", "Faltas/90"] 
+                
                 # Gerar percentuais para métricas dos estilos
                 for col in metricas_existentes:
-                    df_pos[col + "_pct"] = df_pos[col].rank(pct=True) * 100
+                    if col in metricas_negativas:
+                        # Ranqueamento invertido: asc=False (maior valor é pior, então ranqueia do menor para o maior percentil)
+                        df_pos[col + "_pct"] = df_pos[col].rank(pct=True, ascending=False) * 100
+                    else:
+                        # Ranqueamento normal: asc=True (maior valor é melhor, ranqueia do menor para o maior percentil)
+                        df_pos[col + "_pct"] = df_pos[col].rank(pct=True) * 100
 
-                # Score médio do jogador nos estilos selecionados
-                df_pos["Score"] = df_pos[[c+"_pct" for c in metricas_existentes]].mean(axis=1)
+
+                # ---------------------------------------------
+                # NOVO CÁLCULO DE SCORE COM PESOS (Ponderação)
+                # ---------------------------------------------
+                
+                # 1. Coletar os pesos para as métricas escolhidas
+                pesos_finais = {}
+                for estilo in estilos_escolhidos:
+                    # Tenta pegar o peso específico do estilo. Se não existir, pega o peso do estilo geral.
+                    pesos_estilo = pesos_por_estilo.get(estilo, {})
+                    
+                    # Se não encontrou pesos específicos para o estilo, tenta o fallback (ex: Estilo genérico)
+                    if not pesos_estilo:
+                         # Tenta pegar pesos de estilos genéricos/comuns (ex: 'Finalizador' genérico)
+                         # Isso pode ser refinado para uma lógica mais complexa, mas aqui simplificamos a busca.
+                         for key, value in pesos_por_estilo.items():
+                             if key == estilo:
+                                 pesos_estilo = value
+                                 break
+
+                    # Adiciona os pesos das métricas
+                    for metrica, peso in pesos_estilo.items():
+                        if metrica in metricas_existentes:
+                            pesos_finais[metrica] = peso 
+                        
+                # 2. Aplicar a Média Ponderada
+                df_pos["Score Ponderado"] = 0.0
+                soma_pesos = sum(pesos_finais.values())
+                
+                if soma_pesos > 0:
+                    for metrica, peso in pesos_finais.items():
+                        # Score Ponderado += (Percentil * Peso)
+                        df_pos["Score Ponderado"] += df_pos[metrica + "_pct"] * peso
+                        
+                    # Score Final = Soma Ponderada / Soma dos Pesos
+                    df_pos["Score"] = df_pos["Score Ponderado"] / soma_pesos
+                else:
+                    # Fallback para média simples (original) se não houver pesos definidos
+                    df_pos["Score"] = df_pos[[c+"_pct" for c in metricas_existentes]].mean(axis=1)
+
                 df_final = df_pos.sort_values(by="Score", ascending=False)
+                # ---------------------------------------------
+                # FIM DO NOVO CÁLCULO DE SCORE
+                # ---------------------------------------------
+
 
                 st.dataframe(df_final[["Jogador", "Equipa", "Idade", "Score"] + metricas_existentes].round(1))
+
 
                 # -------------------------------
                 # Radar do melhor jogador (percentual para todos KPIs do radar)
@@ -233,8 +421,13 @@ if uploaded_file is not None:
                     for grupo_metrica in kpis_pos.values():
                         todas_metricas_radar.extend(grupo_metrica)
                 todas_metricas_radar = list(set([m for m in todas_metricas_radar if m in df.columns]))
+                
+                # Aplicar ranqueamento para o radar (necessário recalcular ranques invertidos)
                 for col in todas_metricas_radar:
-                    df_final[col + "_pct"] = df_final[col].rank(pct=True) * 100
+                    if col in metricas_negativas:
+                         df_final[col + "_pct"] = df_final[col].rank(pct=True, ascending=False) * 100
+                    else:
+                        df_final[col + "_pct"] = df_final[col].rank(pct=True) * 100
 
                 top_player = df_final.iloc[0]
                 st.subheader(f"Radar Stats - {top_player['Jogador']} ({posicao_sel})")
