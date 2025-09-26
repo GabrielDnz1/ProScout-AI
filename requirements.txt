@@ -1,6 +1,8 @@
-streamlit
+streamlit==1.50.0
 pandas
-scikit-learn
+numpy
 matplotlib
+scikit-learn
 mplsoccer
 Pillow
+requests
