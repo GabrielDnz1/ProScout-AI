@@ -2,11 +2,16 @@ import streamlit as st
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 from mplsoccer import PyPizza, FontManager
+# --- Importações de Scikit-learn ---
+from sklearn.preprocessing import StandardScaler 
+from sklearn.metrics.pairwise import cosine_similarity 
+# -----------------------------------
 
 st.set_page_config(layout="wide")
 st.title("PROScout AI")
 
 uploaded_file = st.file_uploader("📂 Carregue um arquivo CSV ou XLSX", type=["csv", "xlsx"])
+page = st.sidebar.radio("Selecione a Ferramenta AI", ["Análise de Estilos", "PROScout AI: Jogador Similar"]) 
 
 if uploaded_file is not None:
 
@@ -24,24 +29,49 @@ if uploaded_file is not None:
     for col in df.columns:
         if df[col].dtype == "object":
             try:
-                df[col] = df[col].str.replace(",", ".").astype(float)
+                # Tenta converter colunas numéricas que usam vírgula como decimal
+                df[col] = df[col].astype(str).str.replace(".", "", regex=False).str.replace(",", ".", regex=False).astype(float)
             except:
-                pass
+                pass 
 
     # -------------------------------
-    # Filtros
+    # Filtros Comuns
     # -------------------------------
-    idade_min, idade_max = int(df["Idade"].min()), int(df["Idade"].max())
-    idade_sel = st.slider("Idade do jogador", idade_min, idade_max, (idade_min, idade_max))
+    col1_idade, col2_min = st.columns(2)
     
-    minplayed_min, minplayed = int(df["Minutos jogados:"].min()), int(df["Minutos jogados:"].max())
-    minutesplayed_sel = st.slider("Minutos do jogador na temporada", minplayed_min, minplayed, (minplayed_min, minplayed))
+    # Valores default caso as colunas não existam
+    idade_sel = (0, 100)
+    minutesplayed_sel = (0, 99999)
+
+    with col1_idade:
+        if "Idade" in df.columns and df["Idade"].dtype in ['int64', 'float64']:
+            idade_min, idade_max = int(df["Idade"].min()), int(df["Idade"].max())
+            idade_sel = st.slider("Idade do jogador", idade_min, idade_max, (idade_min, idade_max))
+        else:
+            st.warning("Coluna 'Idade' não encontrada ou não é numérica. Filtro desativado.")
+
+    with col2_min:
+        if "Minutos jogados:" in df.columns and df["Minutos jogados:"].dtype in ['int64', 'float64']:
+            minplayed_min, minplayed = int(df["Minutos jogados:"].min()), int(df["Minutos jogados:"].max())
+            minutesplayed_sel = st.slider("Minutos do jogador na temporada", minplayed_min, minplayed, (minplayed_min, minplayed))
+        else:
+            st.warning("Coluna 'Minutos jogados:' não encontrada ou não é numérica. Filtro desativado.")
     
+    # Aplica os filtros na base de dados
+    df_temp = df.copy()
+    if "Idade" in df_temp.columns:
+        df_temp = df_temp[(df_temp["Idade"] >= idade_sel[0]) & (df_temp["Idade"] <= idade_sel[1])]
+    if "Minutos jogados:" in df_temp.columns:
+        df_filtrado_min_total = df_temp[(df_temp["Minutos jogados:"] >= minutesplayed_sel[0]) & (df_temp["Minutos jogados:"] <= minutesplayed_sel[1])].copy()
+    else:
+        df_filtrado_min_total = df_temp.copy()
     
+    # -------------------------------
+    # Mapeamentos de Estilos, Métricas e Pesos (DEFINIÇÕES)
+    # -------------------------------
     posicoes_fixas = ["Goleiro", "Lateral", "Zagueiro", "Volante", 
-                      "Meia-Central", "Meia-Ofensivo", "Extremo", "Centroavante"]
-    posicao_sel = st.selectbox("Selecione a posição (apenas para o gráfico)", posicoes_fixas)
-
+                     "Meia-Central", "Meia-Ofensivo", "Extremo", "Centroavante"]
+    
     estilos_pos = {
         "Centroavante": ["Finalizador", "Pressionador", "Dominador Aéreo", "Movimentador", "Assistente"],
         "Extremo": ["Driblador", "Finalizador", "Cruzador", "Acelerador", "Assistente"],
@@ -53,431 +83,379 @@ if uploaded_file is not None:
         "Goleiro": ["Shot Stopper", "Sweeper Keeper", "Distribuidor"]
     }
 
-
-    estilos_validos = estilos_pos.get(posicao_sel, [])
-    estilos_escolhidos = st.multiselect("Selecione os estilos", estilos_validos)
-
-    # -------------------------------
-    # Mapeamento de estilos → métricas
-    # -------------------------------
     metricas_por_estilo = {
-        # ----------------
-        # Goleiro
-        # ----------------
         "Shot Stopper": ["Defesas, %", "Golos sofridos/90", "Golos expectáveis defendidos por 90´"],
         "Sweeper Keeper": ["Saídas/90", "Duelos aéreos/90", "Duelos aéreos ganhos, %"],
         "Distribuidor": ["Passes certos, %", "Passes longos certos, %", "Passes para trás recebidos pelo guarda-redes/90"],
-
-        # ----------------
-        # Zagueiro
-        # ----------------
         "Defensor": ["Duelos defensivos/90", "Duelos defensivos ganhos, %", "Cortes/90", "Interseções/90", "Faltas/90"],
         "Líder de Defesa": ["Ações defensivas com êxito/90", "Duelos aéreos ganhos, %"],
         "Construtor": ["Passes/90", "Passes certos, %", "Passes progressivos/90", "Passes progressivos certos, %"],
         "Lançador": ["Passes longos/90", "Passes longos certos, %", "Passes em profundidade/90", "Passes em profundidade certos, %"],
         "Dominador Aéreo": ["Duelos aéreos/90", "Duelos aéreos ganhos, %", "Golos de cabeça/90"],
-
-        # ----------------
-        # Lateral
-        # ----------------
         "Cruzador": ["Cruzamentos/90", "Cruzamentos certos, %", "Passes para a área de penálti/90"],
         "Driblador": ["Dribles/90", "Dribles com sucesso, %", "Acelerações/90"],
         "Desarme": ["Duelos defensivos/90", "Duelos defensivos ganhos, %", "Interseções/90"],
-        "Construtor": ["Passes/90", "Passes certos, %", "Passes progressivos/90", "Passes progressivos certos, %"],
-
-        # ----------------
-        # Volante
-        # ----------------
         "Recuperador": ["Interseções/90", "Duelos defensivos/90", "Duelos defensivos ganhos, %", "Faltas/90"],
         "Box-to-Box": ["Duelos/90", "Interseções/90", "Corridas progressivas/90", "Acelerações/90"],
-        "Construtor": ["Passes/90", "Passes certos, %", "Passes progressivos/90", "Passes progressivos certos, %"],
-        "Assistente": ["Assistências/90", "Assistências esperadas/90", "Passes chave/90"],
-
-        # ----------------
-        # Meia-Central
-        # ----------------
-        "Construtor": ["Passes/90", "Passes certos, %", "Passes progressivos/90", "Passes progressivos certos, %"],
         "Assistente": ["Assistências/90", "Assistências esperadas/90", "Passes chave/90", "Passes inteligentes/90", "Passes inteligentes certos, %"],
-        "Box-to-Box": ["Duelos/90", "Interseções/90", "Corridas progressivas/90", "Acelerações/90"],
-        "Driblador": ["Dribles/90", "Dribles com sucesso, %"],
-        "Finalizador": ["Golos/90", "Remates/90", "Remates à baliza, %"],
-
-        # ----------------
-        # Meia-Ofensivo
-        # ----------------
-        "Assistente": ["Assistências/90", "Assistências esperadas/90", "Passes chave/90", "Passes inteligentes/90", "Passes inteligentes certos, %"],
-        "Finalizador": ["Golos/90", "Remates/90", "Remates à baliza, %", "Golos esperados/90"],
-        "Driblador": ["Dribles/90", "Dribles com sucesso, %", "Acelerações/90"],
-        "Distribuidor": ["Passes para a frente/90", "Passes para a frente certos, %", "Passes progressivos/90", "Passes progressivos certos, %"],
-
-        # ----------------
-        # Extremo
-        # ----------------
-        "Driblador": ["Dribles/90", "Dribles com sucesso, %", "Acelerações/90"],
-        "Cruzador": ["Cruzamentos/90", "Cruzamentos certos, %", "Passes para a área de penálti/90"],
-        "Finalizador": ["Golos/90", "Remates/90", "Remates à baliza, %", "Golos esperados/90"],
-        "Assistente": ["Assistências/90", "Assistências esperadas/90", "Passes chave/90"],
+        "Finalizador": ["Golos/90", "Remates/90", "Remates à baliza, %", "Golos esperados/90", "Toques na área/90"],
         "Acelerador": ["Corridas progressivas/90", "Acelerações/90"],
-
-        # ----------------
-        # Centroavante
-        # ----------------
-        "Finalizador": ["Golos/90", "Remates/90", "Remates à baliza, %", "Toques na área/90"],
         "Pressionador": ["Duelos defensivos/90", "Duelos defensivos ganhos, %", "Acções atacantes com sucesso/90"],
-        "Dominador Aéreo": ["Duelos aéreos/90", "Duelos aéreos ganhos, %", "Golos de cabeça/90"],
         "Movimentador": ["Acelerações/90", "Corridas progressivas/90", "Passes recebidos/90"],
-        "Assistente": ["Assistências/90", "Assistências esperadas/90", "Passes chave/90"]
+        "Especialista em Bola Parada": ["Assistências por bola parada/90", "Passes chave por bola parada/90"],
     }
-
-    # -------------------------------
-    # NOVO: Dicionário de Pesos para o Score (Ponderação)
-    # -------------------------------
-    # Define pesos de 1.0 (menos importante) a 3.0 (mais importante).
+    
+    # Dicionário de Pesos para o Score (Ponderação) - Usado na Análise de Estilos
     pesos_por_estilo = {
-        # ESTILOS GERAIS/REPETIDOS (Usados como fallback se não houver um estilo específico por posição)
-        "Construtor": {
-            "Passes certos, %": 3.0,
-            "Passes progressivos certos, %": 2.5,
-            "Passes progressivos/90": 1.5,
-            "Passes/90": 1.0,
-        },
-        "Assistente": {
-            "Assistências/90": 3.0,
-            "Passes chave/90": 2.5,
-            "Assistências esperadas/90": 2.0,
-            "Passes inteligentes certos, %": 1.5,
-        },
-        "Driblador": {
-            "Dribles com sucesso, %": 2.5,
-            "Dribles/90": 1.5,
-            "Acelerações/90": 1.0,
-        },
-        "Finalizador": {
-            "Golos/90": 3.0,
-            "Golos esperados/90": 2.5,
-            "Remates à baliza, %": 1.5,
-            "Remates/90": 1.0,
-        },
-
-        # Zagueiro
-        "Defensor": {
-            "Duelos defensivos ganhos, %": 3.0,
-            "Interseções/90": 2.5,
-            "Cortes/90": 2.0,
-            "Duelos defensivos/90": 1.0,
-            "Faltas/90": 1.0,
-        },
-        "Líder de Defesa": {
-            "Duelos aéreos ganhos, %": 3.0,
-            "Ações defensivas com êxito/90": 2.0,
-        },
-        "Lançador": {
-            "Passes longos certos, %": 3.0,
-            "Passes em profundidade certos, %": 2.5,
-            "Passes longos/90": 1.5,
-            "Passes em profundidade/90": 1.0,
-        },
-        
-        # Lateral
-        "Cruzador": {
-            "Cruzamentos certos, %": 3.0,
-            "Passes para a área de penálti/90": 2.0,
-            "Cruzamentos/90": 1.0,
-        },
-        "Desarme": {
-            "Duelos defensivos ganhos, %": 3.0,
-            "Interseções/90": 2.0,
-            "Duelos defensivos/90": 1.5,
-        },
-        
-        # Volante
-        "Recuperador": {
-            "Duelos defensivos ganhos, %": 3.0,
-            "Interseções/90": 2.5,
-            "Duelos defensivos/90": 1.5,
-            "Faltas/90": 1.0,
-        },
-        "Box-to-Box": {
-            "Corridas progressivas/90": 2.5,
-            "Interseções/90": 2.0,
-            "Duelos/90": 1.5,
-            "Acelerações/90": 1.0,
-        },
-        "Distribuidor": {
-            "Passes certos, %": 3.0,
-            "Passes curtos / médios precisos, %": 2.5,
-            "Passes curtos / médios /90": 1.5,
-        },
-
-        # Meia-Ofensivo
-        "Distribuidor": { # Sobrescrevendo o Distribuidor geral com foco ofensivo
-            "Passes para a frente certos, %": 3.0,
-            "Passes progressivos certos, %": 2.5,
-            "Passes para a frente/90": 1.5,
-            "Passes progressivos/90": 1.0,
-        },
-
-        # Extremo
-        "Acelerador": {
-            "Corridas progressivas/90": 2.5,
-            "Acelerações/90": 1.5,
-        },
-
-        # Centroavante
-        "Finalizador": {
-            "Golos/90": 3.0,
-            "Toques na área/90": 2.0,
-            "Remates à baliza, %": 1.5,
-            "Remates/90": 1.0,
-        },
-        "Pressionador": {
-            "Duelos defensivos ganhos, %": 3.0,
-            "Acções atacantes com sucesso/90": 2.0,
-            "Duelos defensivos/90": 1.0,
-        },
-        "Dominador Aéreo": {
-            "Golos de cabeça/90": 3.0,
-            "Duelos aéreos ganhos, %": 2.0,
-            "Duelos aéreos/90": 1.0,
-        },
-        "Movimentador": {
-            "Passes recebidos/90": 2.5,
-            "Corridas progressivas/90": 1.5,
-            "Acelerações/90": 1.0,
-        },
-        
-        # Goleiro
-        "Shot Stopper": {
-            "Defesas, %": 3.0,
-            "Golos expectáveis defendidos por 90´": 2.5,
-            "Golos sofridos/90": 1.0,
-        },
-        "Sweeper Keeper": {
-            "Saídas/90": 2.0,
-            "Duelos aéreos ganhos, %": 3.0,
-            "Duelos aéreos/90": 1.0,
-        },
-        "Distribuidor": {
-            "Passes certos, %": 3.0,
-            "Passes longos certos, %": 2.0,
-            "Passes para trás recebidos pelo guarda-redes/90": 1.0,
-        },
+        "Construtor": {"Passes certos, %": 3.0, "Passes progressivos certos, %": 2.5, "Passes progressivos/90": 1.5, "Passes/90": 1.0,},
+        "Assistente": {"Assistências/90": 3.0, "Passes chave/90": 2.5, "Assistências esperadas/90": 2.0, "Passes inteligentes certos, %": 1.5,},
+        "Driblador": {"Dribles com sucesso, %": 2.5, "Dribles/90": 1.5, "Acelerações/90": 1.0,},
+        "Finalizador": {"Golos/90": 3.0, "Golos esperados/90": 2.5, "Remates à baliza, %": 1.5, "Remates/90": 1.0,},
+        "Defensor": {"Duelos defensivos ganhos, %": 3.0, "Interseções/90": 2.5, "Cortes/90": 2.0, "Duelos defensivos/90": 1.0, "Faltas/90": 1.0,},
+        "Líder de Defesa": {"Duelos aéreos ganhos, %": 3.0, "Ações defensivas com êxito/90": 2.0,},
+        "Lançador": {"Passes longos certos, %": 3.0, "Passes em profundidade certos, %": 2.5, "Passes longos/90": 1.5, "Passes em profundidade/90": 1.0,},
+        "Cruzador": {"Cruzamentos certos, %": 3.0, "Passes para a área de penálti/90": 2.0, "Cruzamentos/90": 1.0,},
+        "Desarme": {"Duelos defensivos ganhos, %": 3.0, "Interseções/90": 2.0, "Duelos defensivos/90": 1.5,},
+        "Recuperador": {"Duelos defensivos ganhos, %": 3.0, "Interseções/90": 2.5, "Duelos defensivos/90": 1.5, "Faltas/90": 1.0,},
+        "Box-to-Box": {"Corridas progressivas/90": 2.5, "Interseções/90": 2.0, "Duelos/90": 1.5, "Acelerações/90": 1.0,},
+        "Distribuidor": {"Passes certos, %": 3.0, "Passes curtos / médios precisos, %": 2.5, "Passes curtos / médios /90": 1.5,},
+        "Acelerador": {"Corridas progressivas/90": 2.5, "Acelerações/90": 1.5,},
+        "Pressionador": {"Duelos defensivos ganhos, %": 3.0, "Acções atacantes com sucesso/90": 2.0, "Duelos defensivos/90": 1.0,},
+        "Dominador Aéreo": {"Golos de cabeça/90": 3.0, "Duelos aéreos ganhos, %": 2.0, "Duelos aéreos/90": 1.0,},
+        "Movimentador": {"Passes recebidos/90": 2.5, "Corridas progressivas/90": 1.5, "Acelerações/90": 1.0,},
+        "Shot Stopper": {"Defesas, %": 3.0, "Golos expectáveis defendidos por 90´": 2.5, "Golos sofridos/90": 1.0,},
+        "Sweeper Keeper": {"Saídas/90": 2.0, "Duelos aéreos ganhos, %": 3.0, "Duelos aéreos/90": 1.0,},
     }
-
-    # -------------------------------
-    # KPIs fixos para o radar por posição
-    # -------------------------------
+    
+    # KPIs fixos para o radar por posição (e para similaridade)
     kpis_por_posicao = {
         "Goleiro": {
-            "Defendendo": ["Defesas, %", "Golos sofridos/90", "Golos sofridos esperados/90",
-                           "Golos expectáveis defendidos por 90´", "Remates sofridos/90", "Jogos sem sofrer golos"],
-            "Posse": ["Passes certos, %", "Passes longos/90", "Passes longos certos, %",
-                      "Passes para trás recebidos pelo guarda-redes/90", "Saídas/90"],
+            "Defendendo": ["Defesas, %", "Golos sofridos/90", "Golos sofridos esperados/90", "Golos expectáveis defendidos por 90´", "Remates sofridos/90", "Jogos sem sofrer golos"],
+            "Posse": ["Passes certos, %", "Passes longos/90", "Passes longos certos, %", "Passes para trás recebidos pelo guarda-redes/90", "Saídas/90"],
             "Atacando": []
         },
         "Zagueiro": {
-            "Defendendo": ["Ações defensivas com êxito/90", "Duelos defensivos/90", "Duelos defensivos ganhos, %",
-                           "Cortes/90", "Cortes de carrinho ajust. à posse", "Remates intercetados/90",
-                           "Interseções/90", "Interceções ajust. à posse",
-                           "Duelos aéreos/90", "Duelos aéreos ganhos, %"],
-            "Posse": ["Passes/90", "Passes certos, %", "Passes para a frente/90", "Passes para a frente certos, %",
-                      "Passes laterais/90", "Passes laterais certos, %",
-                      "Passes progressivos/90", "Passes progressivos certos, %"],
+            "Defendendo": ["Ações defensivas com êxito/90", "Duelos defensivos/90", "Duelos defensivos ganhos, %", "Cortes/90", "Cortes de carrinho ajust. à posse", "Remates intercetados/90", "Interseções/90", "Interceções ajust. à posse", "Duelos aéreos/90", "Duelos aéreos ganhos, %"],
+            "Posse": ["Passes/90", "Passes certos, %", "Passes para a frente/90", "Passes para a frente certos, %", "Passes laterais/90", "Passes laterais certos, %", "Passes progressivos/90", "Passes progressivos certos, %"],
             "Atacando": ["Golos", "Golos de cabeça/90", "Assistências/90"]
         },
         "Lateral": {
             "Defendendo": ["Duelos defensivos/90", "Duelos defensivos ganhos, %", "Interseções/90", "Cortes/90"],
-            "Posse": ["Passes/90", "Passes certos, %", "Passes progressivos/90",
-                      "Passes progressivos certos, %", "Corridas progressivas/90"],
-            "Atacando": ["Assistências/90", "Assistências esperadas/90",
-                         "Cruzamentos/90", "Cruzamentos certos, %",
-                         "Cruzamentos do flanco esquerdo/90", "Cruzamentos precisos do flanco esquerdo, %",
-                         "Cruzamentos do flanco direito/90", "Cruzamentos precisos do flanco direito, %",
-                         "Acelerações/90"]
+            "Posse": ["Passes/90", "Passes certos, %", "Passes progressivos/90", "Passes progressivos certos, %", "Corridas progressivas/90"],
+            "Atacando": ["Assistências/90", "Assistências esperadas/90", "Cruzamentos/90", "Cruzamentos certos, %", "Cruzamentos do flanco esquerdo/90", "Cruzamentos precisos do flanco esquerdo, %", "Cruzamentos do flanco direito/90", "Cruzamentos precisos do flanco direito, %", "Acelerações/90"]
         },
         "Volante": {
             "Defendendo": ["Duelos defensivos/90", "Duelos defensivos ganhos, %", "Interseções/90", "Faltas/90"],
-            "Posse": ["Passes/90", "Passes certos, %", "Passes curtos / médios /90", "Passes curtos / médios precisos, %",
-                      "Passes para a frente/90", "Passes para a frente certos, %", "Passes progressivos/90", "Passes progressivos certos, %"],
+            "Posse": ["Passes/90", "Passes certos, %", "Passes curtos / médios /90", "Passes curtos / médios precisos, %", "Passes para a frente/90", "Passes para a frente certos, %", "Passes progressivos/90", "Passes progressivos certos, %"],
             "Atacando": ["Assistências/90", "Assistências esperadas/90", "Passes chave/90", "Passes inteligentes/90"]
         },
         "Meia-Ofensivo": {
             "Defendendo": ["Duelos/90", "Duelos ganhos, %"],
-            "Posse": ["Passes/90", "Passes certos, %", "Passes chave/90",
-                      "Passes para terço final/90", "Passes certos para terço final, %",
-                      "Passes para a área de penálti/90", "Passes precisos para a área de penálti, %",
-                      "Passes inteligentes/90"],
-            "Atacando": ["Golos/90", "Golos esperados/90", "Assistências/90", "Assistências esperadas/90",
-                         "Dribles/90", "Dribles com sucesso, %", "Toques na área/90"]
+            "Posse": ["Passes/90", "Passes certos, %", "Passes chave/90", "Passes para terço final/90", "Passes certos para terço final, %", "Passes para a área de penálti/90", "Passes precisos para a área de penálti, %", "Passes inteligentes/90"],
+            "Atacando": ["Golos/90", "Golos esperados/90", "Assistências/90", "Assistências esperadas/90", "Dribles/90", "Dribles com sucesso, %", "Toques na área/90"]
         },
         "Extremo": {
             "Defendendo": ["Duelos ofensivos/90", "Duelos ofensivos ganhos, %"],
-            "Posse": ["Passes/90", "Passes certos, %", "Passes progressivos/90", "Passes progressivos certos, %",
-                      "Corridas progressivas/90", "Acelerações/90"],
-            "Atacando": ["Golos/90", "Golos esperados/90", "Assistências/90", "Assistências esperadas/90",
-                         "Cruzamentos/90", "Cruzamentos certos, %", "Dribles/90", "Dribles com sucesso, %",
-                         "Toques na área/90"]
+            "Posse": ["Passes/90", "Passes certos, %", "Passes progressivos/90", "Passes progressivos certos, %", "Corridas progressivas/90", "Acelerações/90"],
+            "Atacando": ["Golos/90", "Golos esperados/90", "Assistências/90", "Assistências esperadas/90", "Cruzamentos/90", "Cruzamentos certos, %", "Dribles/90", "Dribles com sucesso, %", "Toques na área/90"]
         },
         "Centroavante": {
             "Defendendo": ["Ações defensivas com êxito/90", "Duelos aéreos/90", "Duelos aéreos ganhos, %"],
             "Posse": ["Passes/90", "Passes certos, %", "Passes recebidos/90", "Passes longos recebidos/90"],
-            "Atacando": ["Golos/90", "Golos sem ser por penálti/90", "Golos esperados/90", "Golos de cabeça/90",
-                         "Remates/90", "Remates à baliza, %", "Toques na área/90", "Acelerações/90"]
+            "Atacando": ["Golos/90", "Golos sem ser por penálti/90", "Golos esperados/90", "Golos de cabeça/90", "Remates/90", "Remates à baliza, %", "Toques na área/90", "Acelerações/90"]
         }
     }
 
 
-    # -------------------------------
-    # Botão gerar análise
-    # -------------------------------
-    if st.button("Gerar análise"):
+    # =======================================================
+    # PÁGINA 1: ANÁLISE DE ESTILOS (PROSCOUT AI)
+    # =======================================================
+    if page == "Análise de Estilos":
+        st.header("Análise de Estilos de Jogadores (Score Ponderado)")
 
-        df_filtrado = df[(df["Idade"] >= idade_sel[0]) & (df["Idade"] <= idade_sel[1])]
-        df_filtrado = df[(df["Minutos jogados:"] >= minutesplayed_sel[0]) & (df["Minutos jogados:"] <= minutesplayed_sel[1])]
-        if df_filtrado.empty:
-            st.warning("Nenhum jogador encontrado com esses filtros.")
-        elif not estilos_escolhidos:
-            st.warning("Selecione pelo menos um estilo para análise.")
-        else:
-            # Métricas selecionadas pelos estilos
-            metricas = []
-            for estilo in estilos_escolhidos:
-                metricas.extend(metricas_por_estilo.get(estilo, []))
-            metricas_existentes = [m for m in metricas if m in df_filtrado.columns]
+        posicao_sel = st.selectbox("Selecione a posição (apenas para o gráfico)", posicoes_fixas)
 
-            if not metricas_existentes:
-                st.warning("Nenhuma métrica válida encontrada no dataset.")
+        estilos_validos = estilos_pos.get(posicao_sel, [])
+        estilos_escolhidos = st.multiselect("Selecione os estilos", estilos_validos)
+
+        # -------------------------------
+        # Botão gerar análise
+        # -------------------------------
+        if st.button("Gerar análise"):
+
+            if df_filtrado_min_total.empty:
+                st.warning("Nenhum jogador encontrado com esses filtros.")
+            elif not estilos_escolhidos:
+                st.warning("Selecione pelo menos um estilo para análise.")
             else:
-                df_pos = df_filtrado.copy()
-                
-                # Métrica para ranqueamento invertido (quanto MENOR o valor, MELHOR a classificação)
-                # Ex: 'Golos sofridos/90', 'Faltas/90'
-                metricas_negativas = ["Golos sofridos/90", "Faltas/90"] 
-                
-                # Gerar percentuais para métricas dos estilos
-                for col in metricas_existentes:
-                    if col in metricas_negativas:
-                        # Ranqueamento invertido: asc=False (maior valor é pior, então ranqueia do menor para o maior percentil)
-                        df_pos[col + "_pct"] = df_pos[col].rank(pct=True, ascending=False) * 100
-                    else:
-                        # Ranqueamento normal: asc=True (maior valor é melhor, ranqueia do menor para o maior percentil)
-                        df_pos[col + "_pct"] = df_pos[col].rank(pct=True) * 100
-
-
-                # ---------------------------------------------
-                # NOVO CÁLCULO DE SCORE COM PESOS (Ponderação)
-                # ---------------------------------------------
-                
-                # 1. Coletar os pesos para as métricas escolhidas
-                pesos_finais = {}
+                # Métricas selecionadas pelos estilos
+                metricas = []
                 for estilo in estilos_escolhidos:
-                    # Tenta pegar o peso específico do estilo. Se não existir, pega o peso do estilo geral.
-                    pesos_estilo = pesos_por_estilo.get(estilo, {})
+                    metricas.extend(metricas_por_estilo.get(estilo, []))
+                metricas_existentes = list(set([m for m in metricas if m in df_filtrado_min_total.columns])) # Usa set para remover duplicatas
+                
+                df_pos = df_filtrado_min_total.copy()
+
+                if not metricas_existentes:
+                    st.warning("Nenhuma métrica válida encontrada no dataset para os estilos selecionados.")
+                else:
+                    # Métrica para ranqueamento invertido
+                    metricas_negativas = ["Golos sofridos/90", "Faltas/90"] 
                     
-                    # Se não encontrou pesos específicos para o estilo, tenta o fallback (ex: Estilo genérico)
-                    if not pesos_estilo:
-                         # Tenta pegar pesos de estilos genéricos/comuns (ex: 'Finalizador' genérico)
-                         # Isso pode ser refinado para uma lógica mais complexa, mas aqui simplificamos a busca.
-                         for key, value in pesos_por_estilo.items():
-                             if key == estilo:
-                                 pesos_estilo = value
-                                 break
+                    # Gerar percentuais para métricas dos estilos
+                    for col in metricas_existentes:
+                        if col in metricas_negativas:
+                            df_pos[col + "_pct"] = df_pos[col].rank(pct=True, ascending=False) * 100
+                        else:
+                            df_pos[col + "_pct"] = df_pos[col].rank(pct=True) * 100
 
-                    # Adiciona os pesos das métricas
-                    for metrica, peso in pesos_estilo.items():
-                        if metrica in metricas_existentes:
-                            pesos_finais[metrica] = peso 
+                    # ---------------------------------------------
+                    # CÁLCULO DE SCORE COM PESOS (Ponderação)
+                    # ---------------------------------------------
+                    
+                    pesos_finais = {}
+                    for estilo in estilos_escolhidos:
+                        pesos_estilo = pesos_por_estilo.get(estilo, {})
                         
-                # 2. Aplicar a Média Ponderada
-                df_pos["Score Ponderado"] = 0.0
-                soma_pesos = sum(pesos_finais.values())
-                
-                if soma_pesos > 0:
-                    for metrica, peso in pesos_finais.items():
-                        # Score Ponderado += (Percentil * Peso)
-                        df_pos["Score Ponderado"] += df_pos[metrica + "_pct"] * peso
+                        # Tenta coletar pesos de estilos genéricos
+                        if not pesos_estilo:
+                            pesos_estilo = pesos_por_estilo.get(estilo, {})
                         
-                    # Score Final = Soma Ponderada / Soma dos Pesos
-                    df_pos["Score"] = df_pos["Score Ponderado"] / soma_pesos
-                else:
-                    # Fallback para média simples (original) se não houver pesos definidos
-                    df_pos["Score"] = df_pos[[c+"_pct" for c in metricas_existentes]].mean(axis=1)
-
-                df_final = df_pos.sort_values(by="Score", ascending=False)
-                # ---------------------------------------------
-                # FIM DO NOVO CÁLCULO DE SCORE
-                # ---------------------------------------------
-
-
-                st.dataframe(df_final[["Jogador", "Equipa", "Idade", "Score"] + metricas_existentes].round(1))
-
-
-                # -------------------------------
-                # Radar do melhor jogador (percentual para todos KPIs do radar)
-                # -------------------------------
-                # Gerar percentuais para todas métricas do radar
-                todas_metricas_radar = []
-                for kpis_pos in kpis_por_posicao.values():
-                    for grupo_metrica in kpis_pos.values():
-                        todas_metricas_radar.extend(grupo_metrica)
-                todas_metricas_radar = list(set([m for m in todas_metricas_radar if m in df.columns]))
-                
-                # Aplicar ranqueamento para o radar (necessário recalcular ranques invertidos)
-                for col in todas_metricas_radar:
-                    if col in metricas_negativas:
-                         df_final[col + "_pct"] = df_final[col].rank(pct=True, ascending=False) * 100
+                        # Adiciona os pesos das métricas
+                        for metrica, peso in pesos_estilo.items():
+                            if metrica in metricas_existentes:
+                                # Usa o maior peso se a métrica for relevante para múltiplos estilos
+                                pesos_finais[metrica] = max(pesos_finais.get(metrica, 0.0), peso)
+                            
+                    df_pos["Score Ponderado"] = 0.0
+                    soma_pesos = sum(pesos_finais.values())
+                    
+                    if soma_pesos > 0:
+                        for metrica, peso in pesos_finais.items():
+                            df_pos["Score Ponderado"] += df_pos[metrica + "_pct"] * peso
+                            
+                        df_pos["Score"] = df_pos["Score Ponderado"] / soma_pesos
                     else:
-                        df_final[col + "_pct"] = df_final[col].rank(pct=True) * 100
+                        # Fallback para média simples (original) se não houver pesos definidos
+                        df_pos["Score"] = df_pos[[c+"_pct" for c in metricas_existentes]].mean(axis=1)
 
-                top_player = df_final.iloc[0]
-                st.subheader(f"Jogador Sugerido - {top_player['Jogador']} ({posicao_sel})")
+                    df_final = df_pos.sort_values(by="Score", ascending=False)
+                    
+                    st.dataframe(df_final[["Jogador", "Equipa", "Idade", "Score"] + metricas_existentes].round(1))
 
-                kpis = kpis_por_posicao.get(posicao_sel, {})
-                metricas_ordenadas = []
-                valores = []
-                slice_colors = []
-                grupo_cores = {"Atacando": "#FF5733", "Defendendo": "#33FF57", "Posse": "#3375FF"}
 
-                for grupo, metricas in kpis.items():
-                    for metrica in metricas:
-                        pct_col = metrica + "_pct"
-                        if pct_col in df_final.columns:
-                            metricas_ordenadas.append(metrica)
-                            valor = df_final.loc[df_final["Jogador"] == top_player["Jogador"], pct_col].values[0]
-                            valores.append(round(float(valor), 2))
-                            slice_colors.append(grupo_cores.get(grupo, "#999999"))
+                    # -------------------------------
+                    # Radar do melhor jogador
+                    # -------------------------------
+                    
+                    # 1. Lista de todas as métricas que podem ir no radar (para calcular os percentis)
+                    todas_metricas_radar = []
+                    for kpis_pos in kpis_por_posicao.values():
+                        for grupo_metrica in kpis_pos.values():
+                            todas_metricas_radar.extend(grupo_metrica)
+                    todas_metricas_radar = list(set([m for m in todas_metricas_radar if m in df_final.columns]))
+                    
+                    # 2. Aplicar ranqueamento (percentil) para o radar
+                    metricas_negativas = ["Golos sofridos/90", "Faltas/90"] 
+                    for col in todas_metricas_radar:
+                        if col + "_pct" not in df_final.columns: # Não recalcular o que já existe
+                             if col in metricas_negativas:
+                                 df_final[col + "_pct"] = df_final[col].rank(pct=True, ascending=False) * 100
+                             else:
+                                 df_final[col + "_pct"] = df_final[col].rank(pct=True) * 100
 
-                if metricas_ordenadas:
-                    font_normal = FontManager("https://raw.githubusercontent.com/googlefonts/roboto/main/src/hinted/Roboto-Regular.ttf")
-                    font_bold = FontManager("https://raw.githubusercontent.com/google/fonts/main/apache/robotoslab/RobotoSlab[wght].ttf")
+                    if df_final.empty:
+                        st.warning("Não há jogadores para plotar no radar.")
+                    else:
+                        top_player = df_final.iloc[0]
+                        st.subheader(f"Jogador Sugerido - {top_player.get('Jogador', 'N/A')} ({posicao_sel})")
 
-                    baker = PyPizza(
-                        params=metricas_ordenadas,
-                        background_color="#ffffff",
-                        straight_line_color="#cccccc",
-                        straight_line_lw=1,
-                        last_circle_lw=0,
-                        other_circle_lw=0,
-                        inner_circle_size=20
-                    )
+                        kpis = kpis_por_posicao.get(posicao_sel, {})
+                        metricas_ordenadas = []
+                        valores = []
+                        slice_colors = []
+                        grupo_cores = {"Atacando": "#FF5733", "Defendendo": "#33FF57", "Posse": "#3375FF"}
 
-                    fig, ax = baker.make_pizza(
-                        valores,
-                        figsize=(6, 6),
-                        color_blank_space="same",
-                        slice_colors=slice_colors,
-                        value_colors=["#000000"] * len(valores),
-                        kwargs_slices=dict(edgecolor="#ffffff", zorder=2, linewidth=1),
-                        kwargs_params=dict(color="#000000", fontsize=4, fontproperties=font_normal.prop, va="center"),
-                        kwargs_values=dict(color="#000000", fontsize=8, fontproperties=font_bold.prop, zorder=3, va="center")
-                    )
+                        for grupo, metricas in kpis.items():
+                            for metrica in metricas:
+                                pct_col = metrica + "_pct"
+                                if pct_col in df_final.columns:
+                                    metricas_ordenadas.append(metrica)
+                                    valor = df_final.loc[df_final["Jogador"] == top_player["Jogador"], pct_col].values[0]
+                                    valores.append(round(float(valor), 2))
+                                    slice_colors.append(grupo_cores.get(grupo, "#999999"))
 
-                    fig.text(
-                        0.5, 0.97,
-                        f"{top_player['Jogador']} - {top_player['Equipa']} ({', '.join(estilos_escolhidos)})",
-                        size=12, ha="center", fontproperties=font_bold.prop, color="#000000"
-                    )
+                        if metricas_ordenadas:
+                            try:
+                                font_normal = FontManager("https://raw.githubusercontent.com/googlefonts/roboto/main/src/hinted/Roboto-Regular.ttf")
+                                font_bold = FontManager("https://raw.githubusercontent.com/google/fonts/main/apache/robotoslab/RobotoSlab[wght].ttf")
 
-                    st.pyplot(fig)
-                else:
-                    st.warning("Não há métricas disponíveis para o radar desta posição.")
+                                baker = PyPizza(
+                                    params=metricas_ordenadas,
+                                    background_color="#ffffff",
+                                    straight_line_color="#cccccc",
+                                    straight_line_lw=1,
+                                    last_circle_lw=0,
+                                    other_circle_lw=0,
+                                    inner_circle_size=20
+                                )
+
+                                fig, ax = baker.make_pizza(
+                                    valores,
+                                    figsize=(6, 6),
+                                    color_blank_space="same",
+                                    slice_colors=slice_colors,
+                                    value_colors=["#000000"] * len(valores),
+                                    kwargs_slices=dict(edgecolor="#ffffff", zorder=2, linewidth=1),
+                                    kwargs_params=dict(color="#000000", fontsize=4, fontproperties=font_normal.prop, va="center"),
+                                    kwargs_values=dict(color="#000000", fontsize=8, fontproperties=font_bold.prop, zorder=3, va="center")
+                                )
+
+                                fig.text(
+                                    0.5, 0.97,
+                                    f"{top_player.get('Jogador', 'N/A')} - {top_player.get('Equipa', 'N/A')} ({', '.join(estilos_escolhidos)})",
+                                    size=12, ha="center", fontproperties=font_bold.prop, color="#000000"
+                                )
+
+                                st.pyplot(fig)
+                            except Exception as e:
+                                st.error(f"Erro ao gerar o gráfico de radar: {e}")
+                        else:
+                            st.warning("Não há métricas disponíveis para o radar desta posição.")
+
+# =======================================================
+    # PÁGINA 2: PROSCOUT AI (JOGADOR SIMILAR) - CORREÇÃO DE DUPLICIDADE
+    # =======================================================
+    if page == "PROScout AI: Jogador Similar":
+        st.header("🔍 Encontre Jogadores Similares (AI Similarity - Busca Universal)")
+        
+        # Cria uma chave única temporária (Jogador + Equipa)
+        if 'Jogador' in df.columns and 'Equipa' in df.columns:
+            df_calculo = df_filtrado_min_total.copy()
+            df_calculo['Chave_Unica'] = df_calculo['Jogador'] + " (" + df_calculo['Equipa'] + ")"
+            chave_unica_disponivel = True
+        else:
+            st.error("As colunas 'Jogador' ou 'Equipa' são essenciais e não foram encontradas.")
+            chave_unica_disponivel = False
+            
+        jogador_referencia = None
+        
+        if chave_unica_disponivel:
+             # Lista de TODAS as chaves únicas
+             options = df_calculo['Chave_Unica'].unique().tolist()
+             
+             if not options:
+                 st.warning("Nenhum jogador elegível encontrado com os filtros de idade/minutos. Ajuste os filtros acima.")
+                 options = ['-- Nenhum jogador elegível --']
+
+             # O seletor AGORA USA A CHAVE ÚNICA (Jogador + Equipa)
+             jogador_referencia_chave = st.selectbox("1. Selecione o Jogador de Referência (Nome + Equipa):", options)
+             
+             # Obtém o nome real do jogador e a posição para contexto
+             if jogador_referencia_chave != '-- Nenhum jogador elegível --':
+                 ref_data_row_base = df_calculo[df_calculo['Chave_Unica'] == jogador_referencia_chave]
+                 jogador_referencia = ref_data_row_base['Jogador'].iloc[0]
+                 posicao_contexto = ref_data_row_base['Posição'].iloc[0] if 'Posição' in ref_data_row_base.columns else "N/A"
+                 st.info(f"O jogador de referência '{jogador_referencia}' joga como: **{posicao_contexto}** (A busca por similaridade será universal).")
+             else:
+                 jogador_referencia = None
+                 
+        else:
+             st.stop() # Para a execução se as chaves não puderem ser criadas
+        
+        # Mínimo de minutos removido como solicitado anteriormente.
+        
+        
+        if st.button("Buscar Jogadores Similares") and jogador_referencia is not None and jogador_referencia_chave != '-- Nenhum jogador elegível --':
+            
+            # --- 1. Definir Métrica Universal ---
+            all_kpis = []
+            for kpis_pos in kpis_por_posicao.values():
+                for grupo_metrica in kpis_pos.values():
+                    all_kpis.extend(grupo_metrica)
+            metricas_sim = list(set([m for m in all_kpis if m in df.columns]))
+            
+            if not metricas_sim:
+                st.warning("Nenhuma métrica de comparação válida encontrada no CSV. Verifique se as colunas estão corretas.")
+                can_proceed = False
+            else:
+                can_proceed = True
+
+
+            if can_proceed:
+                
+                # --- 2. Filtrar Pool de Busca (Universal) ---
+                # Pool é df_calculo (que tem a Chave_Unica)
+                pool_busca = df_calculo.copy()
+                pool_busca = pool_busca[pool_busca['Chave_Unica'] != jogador_referencia_chave] # Remove o próprio jogador pela CHAVE ÚNICA
+                
+                # Extrair o dado do jogador de referência (usando a CHAVE ÚNICA)
+                ref_data_row = df_calculo[df_calculo['Chave_Unica'] == jogador_referencia_chave]
+                
+                if ref_data_row.empty:
+                    st.error(f"Erro: Jogador '{jogador_referencia_chave}' não encontrado no pool de dados.")
+                    can_proceed = False
+                
+                if pool_busca.empty:
+                    st.warning("Nenhum outro jogador encontrado no pool de busca para comparação.")
+                    can_proceed = False
+                
+                if can_proceed:
+                    # 3. Preparar os dados (usando Chave_Unica como índice)
+                    df_sim = pool_busca[['Chave_Unica'] + metricas_sim].set_index('Chave_Unica').fillna(0)
+                    ref_data = ref_data_row[metricas_sim].fillna(0).iloc[0].to_frame().T
+                    
+                    scaler_sim = StandardScaler()
+                    
+                    if len(df_sim) > 1:
+                        # Escalonamento se houver dados suficientes no pool
+                        df_sim_scaled = scaler_sim.fit_transform(df_sim)
+                        df_sim_scaled = pd.DataFrame(df_sim_scaled, columns=metricas_sim, index=df_sim.index)
+                        ref_vector_scaled = scaler_sim.transform(ref_data).reshape(1, -1)
+                    else:
+                        st.info("Pool de busca pequeno. O cálculo será feito sem normalização.")
+                        df_sim_scaled = df_sim
+                        ref_vector_scaled = ref_data.values.reshape(1, -1)
+                        
+
+                    # 4. Calcular Similaridade (Cosine Similarity)
+                    similarity_scores = cosine_similarity(ref_vector_scaled, df_sim_scaled)
+                    
+                    # 5. Criar DataFrame de Resultados (indexado pela Chave Única)
+                    df_results = pd.DataFrame(similarity_scores.T, index=df_sim_scaled.index, columns=['Similaridade'])
+                    
+                    # CONVERTE SIMILARIDADE DE [0, 1] PARA [0, 100]
+                    df_results['Similaridade'] = df_results['Similaridade'] * 100 
+                    
+                    df_results = df_results.sort_values(by='Similaridade', ascending=False)
+                    
+                    # Obtém as CHAVES ÚNICAS dos top 5
+                    top_similares_chaves = df_results.head(5).index.tolist()
+                    
+                    # 6. Exibir Resultados
+                    st.subheader(f"Top 5 Jogadores Mais Similares a: **{jogador_referencia}** (Universal)")
+                    
+                    # Pega as linhas dos jogadores similares do DataFrame original (df_calculo tem a Chave_Unica)
+                    df_display = df_calculo[df_calculo['Chave_Unica'].isin(top_similares_chaves)].set_index('Chave_Unica')
+                    
+                    # Reordena e mescla a pontuação de similaridade (AGORA TUDO FUNCIONA POR CHAVE ÚNICA)
+                    df_display = df_display.reindex(top_similares_chaves)
+                    df_display = df_display.join(df_results, how='left')
+
+                    # Renomeia o índice para 'Jogador (Equipa)' para melhor visualização
+                    df_display.index.name = 'Jogador (Chave Única)'
+                    
+                    # Colunas relevantes para o display final
+                    display_cols = ['Jogador', 'Equipa', 'Idade', 'Posição', 'Similaridade', 'Minutos jogados:']
+                    
+                    # Filtra colunas que realmente existem no df_display
+                    df_display = df_display[[col for col in display_cols if col in df_display.columns]].round(2)
+                    
+                    # Exibe a similaridade como porcentagem de 0 a 100 com barra de progresso
+                    st.dataframe(df_display, 
+                                 column_config={"Similaridade": st.column_config.ProgressColumn(
+                                     "Similaridade (%)", 
+                                     format="%.2f %%", 
+                                     min_value=0, 
+                                     max_value=100
+                                 )})
