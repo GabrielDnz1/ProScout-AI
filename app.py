@@ -11,7 +11,7 @@ st.set_page_config(layout="wide")
 st.title("PROScout AI")
 
 uploaded_file = st.file_uploader("📂 Carregue um arquivo CSV ou XLSX", type=["csv", "xlsx"])
-page = st.sidebar.radio("Selecione a Ferramenta AI", ["Análise de Estilos", "PROScout AI: Jogador Similar"]) 
+page = st.sidebar.radio("Selecione a Ferramenta AI", ["Análise de Estilos", "Jogador Similar"]) 
 
 if uploaded_file is not None:
 
