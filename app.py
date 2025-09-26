@@ -4,7 +4,7 @@ from sklearn.preprocessing import MinMaxScaler
 from mplsoccer import PyPizza, FontManager
 
 st.set_page_config(layout="wide")
-st.title("⚽ Analisador de Estilos de Jogadores")
+st.title("PROScout AI")
 
 uploaded_file = st.file_uploader("📂 Carregue um arquivo CSV ou XLSX", type=["csv", "xlsx"])
 
@@ -430,7 +430,7 @@ if uploaded_file is not None:
                         df_final[col + "_pct"] = df_final[col].rank(pct=True) * 100
 
                 top_player = df_final.iloc[0]
-                st.subheader(f"Radar Stats - {top_player['Jogador']} ({posicao_sel})")
+                st.subheader(f"Jogador Sugerido - {top_player['Jogador']} ({posicao_sel})")
 
                 kpis = kpis_por_posicao.get(posicao_sel, {})
                 metricas_ordenadas = []
