@@ -323,139 +323,150 @@ if uploaded_file is not None:
                         else:
                             st.warning("Não há métricas disponíveis para o radar desta posição.")
 
-# =======================================================
-    # PÁGINA 2: PROSCOUT AI (JOGADOR SIMILAR) - CORREÇÃO DE DUPLICIDADE
     # =======================================================
-    if page == "PROScout AI: Jogador Similar":
-        st.header("🔍 Encontre Jogadores Similares (AI Similarity - Busca Universal)")
+    # PÁGINA 2: PROSCOUT AI (JOGADOR SIMILAR) - UNIVERSAL E ROBUSTA
+    # =======================================================
+    if page == "Jogador Similar":
+        st.header("🔍 Encontre Jogadores Similares (AI Similarity - Busca Universal Segmentada)")
         
-        # Cria uma chave única temporária (Jogador + Equipa)
-        if 'Jogador' in df.columns and 'Equipa' in df.columns:
-            df_calculo = df_filtrado_min_total.copy()
-            df_calculo['Chave_Unica'] = df_calculo['Jogador'] + " (" + df_calculo['Equipa'] + ")"
-            chave_unica_disponivel = True
-        else:
-            st.error("As colunas 'Jogador' ou 'Equipa' são essenciais e não foram encontradas.")
-            chave_unica_disponivel = False
-            
+        # --- 0. Preparação e Criação de Chave Única ---
+        chave_unica_disponivel = False
+        options = ['-- Colunas ' + ', '.join(['Jogador', 'Equipa', 'Posição']) + ' não encontradas --']
         jogador_referencia = None
         
-        if chave_unica_disponivel:
-             # Lista de TODAS as chaves únicas
-             options = df_calculo['Chave_Unica'].unique().tolist()
-             
-             if not options:
-                 st.warning("Nenhum jogador elegível encontrado com os filtros de idade/minutos. Ajuste os filtros acima.")
-                 options = ['-- Nenhum jogador elegível --']
+        if 'Jogador' in df.columns and 'Equipa' in df.columns and 'Posição' in df.columns:
+            df_calculo = df_filtrado_min_total.copy()
+            df_calculo['Chave_Unica'] = df_calculo['Jogador'] + " (" + df_calculo['Equipa'] + ")"
+            
+            if not df_calculo.empty:
+                chave_unica_disponivel = True
+                options = df_calculo['Chave_Unica'].unique().tolist()
+                
+                if not options:
+                    options = ['-- Nenhum jogador elegível --']
 
-             # O seletor AGORA USA A CHAVE ÚNICA (Jogador + Equipa)
-             jogador_referencia_chave = st.selectbox("1. Selecione o Jogador de Referência (Nome + Equipa):", options)
-             
-             # Obtém o nome real do jogador e a posição para contexto
-             if jogador_referencia_chave != '-- Nenhum jogador elegível --':
-                 ref_data_row_base = df_calculo[df_calculo['Chave_Unica'] == jogador_referencia_chave]
-                 jogador_referencia = ref_data_row_base['Jogador'].iloc[0]
-                 posicao_contexto = ref_data_row_base['Posição'].iloc[0] if 'Posição' in ref_data_row_base.columns else "N/A"
-                 st.info(f"O jogador de referência '{jogador_referencia}' joga como: **{posicao_contexto}** (A busca por similaridade será universal).")
-             else:
-                 jogador_referencia = None
-                 
-        else:
-             st.stop() # Para a execução se as chaves não puderem ser criadas
-        
-        # Mínimo de minutos removido como solicitado anteriormente.
-        
-        
-        if st.button("Buscar Jogadores Similares") and jogador_referencia is not None and jogador_referencia_chave != '-- Nenhum jogador elegível --':
-            
-            # --- 1. Definir Métrica Universal ---
-            all_kpis = []
-            for kpis_pos in kpis_por_posicao.values():
-                for grupo_metrica in kpis_pos.values():
-                    all_kpis.extend(grupo_metrica)
-            metricas_sim = list(set([m for m in all_kpis if m in df.columns]))
-            
-            if not metricas_sim:
-                st.warning("Nenhuma métrica de comparação válida encontrada no CSV. Verifique se as colunas estão corretas.")
-                can_proceed = False
+        # O seletor AGORA É SEMPRE EXIBIDO
+        jogador_referencia_chave = st.selectbox("1. Selecione o Jogador de Referência (Nome + Equipa):", options)
+
+        if chave_unica_disponivel and jogador_referencia_chave != '-- Nenhum jogador elegível --':
+            ref_data_row_base = df_calculo[df_calculo['Chave_Unica'] == jogador_referencia_chave]
+            if not ref_data_row_base.empty:
+                jogador_referencia = ref_data_row_base['Jogador'].iloc[0]
+                posicao_contexto = ref_data_row_base['Posição'].iloc[0]
+                
+                # Detecção do TIPO de jogador (Goleiro vs Linha)
+                tipo_jogador = 'Goleiro' if posicao_contexto == 'Goleiro' else 'Linha'
+                
+                st.info(f"O jogador de referência '{jogador_referencia}' joga como: **{posicao_contexto}** (A busca será segmentada por **{tipo_jogador}**).")
             else:
-                can_proceed = True
-
-
-            if can_proceed:
+                 jogador_referencia = None
+                 st.warning("Jogador de referência não encontrado no conjunto de dados filtrado. Tente ajustar os filtros.")
+        
+        # REMOVIDO: O seletor de Mínimo de Minutos (item 2)
+        
+        if st.button("Buscar Jogadores Similares") and jogador_referencia is not None:
+            
+            if not chave_unica_disponivel or jogador_referencia_chave not in df_calculo['Chave_Unica'].values:
+                st.error("Não é possível executar a busca. Verifique se as colunas estão corretas e se o jogador selecionado é válido.")
+            else:
+                # --- 1. Definir Métricas Segmentadas ---
+                if tipo_jogador == 'Goleiro':
+                     # Usa APENAS métricas de goleiro
+                    metricas_sim = kpis_por_posicao.get('Goleiro', {}).get('Defendendo', []) + \
+                                   kpis_por_posicao.get('Goleiro', {}).get('Posse', [])
+                else:
+                    # Combina métricas de TODAS as posições de linha
+                    metricas_sim = []
+                    for pos, kpis in kpis_por_posicao.items():
+                        if pos != 'Goleiro':
+                            for grupo_metrica in kpis.values():
+                                metricas_sim.extend(grupo_metrica)
                 
-                # --- 2. Filtrar Pool de Busca (Universal) ---
-                # Pool é df_calculo (que tem a Chave_Unica)
-                pool_busca = df_calculo.copy()
-                pool_busca = pool_busca[pool_busca['Chave_Unica'] != jogador_referencia_chave] # Remove o próprio jogador pela CHAVE ÚNICA
-                
-                # Extrair o dado do jogador de referência (usando a CHAVE ÚNICA)
-                ref_data_row = df_calculo[df_calculo['Chave_Unica'] == jogador_referencia_chave]
-                
-                if ref_data_row.empty:
-                    st.error(f"Erro: Jogador '{jogador_referencia_chave}' não encontrado no pool de dados.")
+                metricas_sim = list(set([m for m in metricas_sim if m in df.columns]))
+    
+                if not metricas_sim:
+                    st.warning("Nenhuma métrica de comparação válida encontrada para o tipo de jogador. Verifique as colunas.")
                     can_proceed = False
-                
-                if pool_busca.empty:
-                    st.warning("Nenhum outro jogador encontrado no pool de busca para comparação.")
-                    can_proceed = False
-                
+                else:
+                    can_proceed = True
+    
+    
                 if can_proceed:
-                    # 3. Preparar os dados (usando Chave_Unica como índice)
-                    df_sim = pool_busca[['Chave_Unica'] + metricas_sim].set_index('Chave_Unica').fillna(0)
-                    ref_data = ref_data_row[metricas_sim].fillna(0).iloc[0].to_frame().T
                     
-                    scaler_sim = StandardScaler()
+                    # --- 2. Filtrar Pool de Busca (Segmentado por Tipo) ---
+                    pool_busca = df_calculo.copy() # DataFrame com Chave_Unica
+                    pool_busca = pool_busca[pool_busca['Chave_Unica'] != jogador_referencia_chave] # Remove o próprio
                     
-                    if len(df_sim) > 1:
-                        # Escalonamento se houver dados suficientes no pool
-                        df_sim_scaled = scaler_sim.fit_transform(df_sim)
-                        df_sim_scaled = pd.DataFrame(df_sim_scaled, columns=metricas_sim, index=df_sim.index)
-                        ref_vector_scaled = scaler_sim.transform(ref_data).reshape(1, -1)
+                    # Filtra o pool de busca pelo tipo de jogador (Goleiro ou Linha)
+                    if tipo_jogador == 'Goleiro':
+                        pool_busca = pool_busca[pool_busca['Posição'] == 'Goleiro'].copy()
                     else:
-                        st.info("Pool de busca pequeno. O cálculo será feito sem normalização.")
-                        df_sim_scaled = df_sim
-                        ref_vector_scaled = ref_data.values.reshape(1, -1)
+                        pool_busca = pool_busca[pool_busca['Posição'] != 'Goleiro'].copy()
+                    
+                    # Extrair o dado de referência
+                    ref_data_row = df_calculo[df_calculo['Chave_Unica'] == jogador_referencia_chave]
+                    
+                    if ref_data_row.empty:
+                        st.error(f"Erro: Jogador '{jogador_referencia_chave}' não encontrado no pool de dados.")
+                        can_proceed = False
+                    
+                    if pool_busca.empty:
+                        st.warning(f"Nenhum outro jogador do tipo **{tipo_jogador}** encontrado no pool de busca para comparação.")
+                        can_proceed = False
+                    
+                    if can_proceed:
+                        # 3. Preparar os dados (usando Chave_Unica como índice)
+                        df_sim = pool_busca[['Chave_Unica'] + metricas_sim].set_index('Chave_Unica').fillna(0)
+                        ref_data = ref_data_row[metricas_sim].fillna(0).iloc[0].to_frame().T
                         
-
-                    # 4. Calcular Similaridade (Cosine Similarity)
-                    similarity_scores = cosine_similarity(ref_vector_scaled, df_sim_scaled)
-                    
-                    # 5. Criar DataFrame de Resultados (indexado pela Chave Única)
-                    df_results = pd.DataFrame(similarity_scores.T, index=df_sim_scaled.index, columns=['Similaridade'])
-                    
-                    # CONVERTE SIMILARIDADE DE [0, 1] PARA [0, 100]
-                    df_results['Similaridade'] = df_results['Similaridade'] * 100 
-                    
-                    df_results = df_results.sort_values(by='Similaridade', ascending=False)
-                    
-                    # Obtém as CHAVES ÚNICAS dos top 5
-                    top_similares_chaves = df_results.head(5).index.tolist()
-                    
-                    # 6. Exibir Resultados
-                    st.subheader(f"Top 5 Jogadores Mais Similares a: **{jogador_referencia}** (Universal)")
-                    
-                    # Pega as linhas dos jogadores similares do DataFrame original (df_calculo tem a Chave_Unica)
-                    df_display = df_calculo[df_calculo['Chave_Unica'].isin(top_similares_chaves)].set_index('Chave_Unica')
-                    
-                    # Reordena e mescla a pontuação de similaridade (AGORA TUDO FUNCIONA POR CHAVE ÚNICA)
-                    df_display = df_display.reindex(top_similares_chaves)
-                    df_display = df_display.join(df_results, how='left')
-
-                    # Renomeia o índice para 'Jogador (Equipa)' para melhor visualização
-                    df_display.index.name = 'Jogador (Chave Única)'
-                    
-                    # Colunas relevantes para o display final
-                    display_cols = ['Jogador', 'Equipa', 'Idade', 'Posição', 'Similaridade', 'Minutos jogados:']
-                    
-                    # Filtra colunas que realmente existem no df_display
-                    df_display = df_display[[col for col in display_cols if col in df_display.columns]].round(2)
-                    
-                    # Exibe a similaridade como porcentagem de 0 a 100 com barra de progresso
-                    st.dataframe(df_display, 
-                                 column_config={"Similaridade": st.column_config.ProgressColumn(
-                                     "Similaridade (%)", 
-                                     format="%.2f %%", 
-                                     min_value=0, 
-                                     max_value=100
-                                 )})
+                        scaler_sim = StandardScaler()
+                        
+                        if len(df_sim) > 1:
+                            # Escalonamento se houver dados suficientes no pool
+                            df_sim_scaled = scaler_sim.fit_transform(df_sim)
+                            df_sim_scaled = pd.DataFrame(df_sim_scaled, columns=metricas_sim, index=df_sim.index)
+                            ref_vector_scaled = scaler_sim.transform(ref_data).reshape(1, -1)
+                        else:
+                            st.info("Pool de busca pequeno. O cálculo será feito sem normalização.")
+                            df_sim_scaled = df_sim
+                            ref_vector_scaled = ref_data.values.reshape(1, -1)
+                            
+    
+                        # 4. Calcular Similaridade (Cosine Similarity)
+                        similarity_scores = cosine_similarity(ref_vector_scaled, df_sim_scaled)
+                        
+                        # 5. Criar DataFrame de Resultados (indexado pela Chave Única)
+                        df_results = pd.DataFrame(similarity_scores.T, index=df_sim_scaled.index, columns=['Similaridade'])
+                        
+                        # CONVERTE SIMILARIDADE DE [0, 1] PARA [0, 100]
+                        df_results['Similaridade'] = df_results['Similaridade'] * 100 
+                        
+                        df_results = df_results.sort_values(by='Similaridade', ascending=False)
+                        
+                        # Obtém as CHAVES ÚNICAS dos top 5
+                        top_similares_chaves = df_results.head(5).index.tolist()
+                        
+                        # 6. Exibir Resultados
+                        st.subheader(f"Top 5 Jogadores Mais Similares a: **{jogador_referencia}** (Busca {tipo_jogador})")
+                        
+                        # Pega as linhas dos jogadores similares
+                        df_display = df_calculo[df_calculo['Chave_Unica'].isin(top_similares_chaves)].set_index('Chave_Unica')
+                        
+                        # Reordena e mescla a pontuação de similaridade
+                        df_display = df_display.reindex(top_similares_chaves)
+                        df_display = df_display.join(df_results, how='left')
+                        
+                        # Colunas relevantes para o display final
+                        display_cols = ['Jogador', 'Equipa', 'Idade', 'Posição', 'Similaridade', 'Minutos jogados:']
+                        
+                        # Filtra colunas que realmente existem no df_display
+                        df_display = df_display[[col for col in display_cols if col in df_display.columns]].round(2)
+                        
+                        # Exibe a similaridade como porcentagem de 0 a 100 com barra de progresso
+                        st.dataframe(df_display, 
+                                     column_config={"Similaridade": st.column_config.ProgressColumn(
+                                         "Similaridade (%)", 
+                                         format="%.2f %%", 
+                                         min_value=0, 
+                                         max_value=100
+                                     )})
