@@ -33,21 +33,26 @@ if uploaded_file is not None:
     # -------------------------------
     idade_min, idade_max = int(df["Idade"].min()), int(df["Idade"].max())
     idade_sel = st.slider("Idade do jogador", idade_min, idade_max, (idade_min, idade_max))
-
+    
+    minplayed_min, minplayed = int(df["Minutos jogados:"].min()), int(df["Minutos jogados:"].max())
+    minutesplayed_sel = st.slider("Minutos do jogador na temporada", minplayed_min, minplayed, (minplayed_min, minplayed))
+    
+    
     posicoes_fixas = ["Goleiro", "Lateral", "Zagueiro", "Volante", 
                       "Meia-Central", "Meia-Ofensivo", "Extremo", "Centroavante"]
     posicao_sel = st.selectbox("Selecione a posição (apenas para o gráfico)", posicoes_fixas)
 
     estilos_pos = {
-        "Centroavante": ["Finalizador", "Pressionador", "Dominador Aéreo", "Movimentador de Área", "Criador de Oportunidades"],
-        "Extremo": ["Driblador", "Finalizador", "Cruzador", "Acelerador", "Criador de Oportunidades"],
-        "Meia-Ofensivo": ["Criador", "Construtor de Jogo", "Driblador", "Finalizador", "Especialista em Bola Parada"],
-        "Meia-Central": ["Construtor de Jogo", "Criador", "Box-to-Box", "Recuperador", "Distribuidor"],
-        "Volante": ["Recuperador", "Construtor de Jogo", "Defensor", "Distribuidor", "Pressionador"],
-        "Lateral": ["Construtor de Jogo", "Cruzador", "Acelerador", "Defensor", "Apoio Ofensivo"],
-        "Zagueiro": ["Defensor", "Dominador Aéreo", "Construtor de Jogo", "Líder de Defesa"],
-        "Goleiro": ["Shot Stopper", "Sweeper Keeper", "Distribuidor", "Líder Defensivo"]
+        "Centroavante": ["Finalizador", "Pressionador", "Dominador Aéreo", "Movimentador", "Assistente"],
+        "Extremo": ["Driblador", "Finalizador", "Cruzador", "Acelerador", "Assistente"],
+        "Meia-Ofensivo": ["Assistente", "Construtor", "Driblador", "Finalizador", "Especialista em Bola Parada"],
+        "Meia-Central": ["Construtor", "Assistente", "Box-to-Box", "Recuperador", "Distribuidor"],
+        "Volante": ["Recuperador", "Construtor", "Defensor", "Distribuidor", "Pressionador"],
+        "Lateral": ["Construtor", "Cruzador", "Acelerador", "Desarme", "Movimentador"],
+        "Zagueiro": ["Defensor", "Dominador Aéreo", "Construtor", "Líder de Defesa", "Lançador"],
+        "Goleiro": ["Shot Stopper", "Sweeper Keeper", "Distribuidor"]
     }
+
 
     estilos_validos = estilos_pos.get(posicao_sel, [])
     estilos_escolhidos = st.multiselect("Selecione os estilos", estilos_validos)
@@ -56,35 +61,74 @@ if uploaded_file is not None:
     # Mapeamento de estilos → métricas
     # -------------------------------
     metricas_por_estilo = {
-        # Centroavante
-        "Finalizador": ["Golos/90", "Remates/90", "Remates à baliza, %", "Toques na área/90"],
-        "Pressionador": ["Duelos defensivos/90", "Duelos defensivos ganhos, %", "Pressões/90"],
-        "Dominador Aéreo": ["Duelos aéreos/90", "Duelos aéreos ganhos, %", "Golos de cabeça"],
-        "Movimentador de Área": ["Acelerações/90", "Corridas progressivas/90", "Passes recebidos/90"],
-        "Criador de Oportunidades": ["Assistências/90", "Assistências esperadas/90", "Passes chave/90"],
+        # ----------------
+        # Goleiro
+        # ----------------
+        "Shot Stopper": ["Defesas, %", "Golos sofridos/90", "Golos expectáveis defendidos por 90´"],
+        "Sweeper Keeper": ["Saídas/90", "Duelos aéreos/90", "Duelos aéreos ganhos, %"],
+        "Distribuidor": ["Passes certos, %", "Passes longos certos, %", "Passes para trás recebidos pelo guarda-redes/90"],
 
+        # ----------------
+        # Zagueiro
+        # ----------------
+        "Defensor": ["Duelos defensivos/90", "Duelos defensivos ganhos, %", "Cortes/90", "Interseções/90", "Faltas/90"],
+        "Líder de Defesa": ["Ações defensivas com êxito/90", "Duelos aéreos ganhos, %"],
+        "Construtor": ["Passes/90", "Passes certos, %", "Passes progressivos/90", "Passes progressivos certos, %"],
+        "Lançador": ["Passes longos/90", "Passes longos certos, %", "Passes em profundidade/90", "Passes em profundidade certos, %"],
+        "Dominador Aéreo": ["Duelos aéreos/90", "Duelos aéreos ganhos, %", "Golos de cabeça/90"],
+
+        # ----------------
+        # Lateral
+        # ----------------
+        "Cruzador": ["Cruzamentos/90", "Cruzamentos certos, %", "Passes para a área de penálti/90"],
+        "Driblador": ["Dribles/90", "Dribles com sucesso, %", "Acelerações/90"],
+        "Desarme": ["Duelos defensivos/90", "Duelos defensivos ganhos, %", "Interseções/90"],
+        "Construtor": ["Passes/90", "Passes certos, %", "Passes progressivos/90", "Passes progressivos certos, %"],
+
+        # ----------------
+        # Volante
+        # ----------------
+        "Recuperador": ["Interseções/90", "Duelos defensivos/90", "Duelos defensivos ganhos, %", "Faltas/90"],
+        "Box-to-Box": ["Duelos/90", "Interseções/90", "Corridas progressivas/90", "Acelerações/90"],
+        "Construtor": ["Passes/90", "Passes certos, %", "Passes progressivos/90", "Passes progressivos certos, %"],
+        "Assistente": ["Assistências/90", "Assistências esperadas/90", "Passes chave/90"],
+
+        # ----------------
+        # Meia-Central
+        # ----------------
+        "Construtor": ["Passes/90", "Passes certos, %", "Passes progressivos/90", "Passes progressivos certos, %"],
+        "Assistente": ["Assistências/90", "Assistências esperadas/90", "Passes chave/90", "Passes inteligentes/90", "Passes inteligentes certos, %"],
+        "Box-to-Box": ["Duelos/90", "Interseções/90", "Corridas progressivas/90", "Acelerações/90"],
+        "Driblador": ["Dribles/90", "Dribles com sucesso, %"],
+        "Finalizador": ["Golos/90", "Remates/90", "Remates à baliza, %"],
+
+        # ----------------
+        # Meia-Ofensivo
+        # ----------------
+        "Assistente": ["Assistências/90", "Assistências esperadas/90", "Passes chave/90", "Passes inteligentes/90", "Passes inteligentes certos, %"],
+        "Finalizador": ["Golos/90", "Remates/90", "Remates à baliza, %", "Golos esperados/90"],
+        "Driblador": ["Dribles/90", "Dribles com sucesso, %", "Acelerações/90"],
+        "Distribuidor": ["Passes para a frente/90", "Passes para a frente certos, %", "Passes progressivos/90", "Passes progressivos certos, %"],
+
+        # ----------------
         # Extremo
+        # ----------------
         "Driblador": ["Dribles/90", "Dribles com sucesso, %", "Acelerações/90"],
         "Cruzador": ["Cruzamentos/90", "Cruzamentos certos, %", "Passes para a área de penálti/90"],
+        "Finalizador": ["Golos/90", "Remates/90", "Remates à baliza, %", "Golos esperados/90"],
+        "Assistente": ["Assistências/90", "Assistências esperadas/90", "Passes chave/90"],
         "Acelerador": ["Corridas progressivas/90", "Acelerações/90"],
 
-        # Meio-Campo
-        "Criador": ["Assistências esperadas/90", "Passes chave/90", "Passes inteligentes/90"],
-        "Construtor de Jogo": ["Passes/90", "Passes certos, %", "Passes progressivos/90", "Passes progressivos certos, %"],
-        "Box-to-Box": ["Duelos/90", "Interseções/90", "Corridas progressivas/90"],
-        "Recuperador": ["Interseções/90", "Duelos defensivos/90", "Duelos defensivos ganhos, %"],
-        "Distribuidor": ["Passes para a frente/90", "Passes para a frente certos, %"],
-
-        # Zagueiro
-        "Defensor": ["Duelos defensivos/90", "Duelos defensivos ganhos, %", "Cortes/90", "Interseções/90"],
-        "Líder de Defesa": ["Ações defensivas com êxito/90", "Duelos aéreos ganhos, %"],
-
-        # Goleiro
-        "Shot Stopper": ["Defesas, %", "Golos sofridos/90", "Golos expectáveis defendidos por 90´"],
-        "Sweeper Keeper": ["Saídas/90", "Passes longos/90", "Passes longos certos, %"],
-        "Distribuidor": ["Passes certos, %", "Passes longos certos, %", "Passes para trás recebidos pelo guarda-redes/90"],
-        "Líder Defensivo": ["Saídas/90"]
+        # ----------------
+        # Centroavante
+        # ----------------
+        "Finalizador": ["Golos/90", "Remates/90", "Remates à baliza, %", "Toques na área/90"],
+        "Pressionador": ["Duelos defensivos/90", "Duelos defensivos ganhos, %", "Acções atacantes com sucesso/90"],
+        "Dominador Aéreo": ["Duelos aéreos/90", "Duelos aéreos ganhos, %", "Golos de cabeça/90"],
+        "Movimentador": ["Acelerações/90", "Corridas progressivas/90", "Passes recebidos/90"],
+        "Assistente": ["Assistências/90", "Assistências esperadas/90", "Passes chave/90"]
     }
+
 
     # -------------------------------
     # KPIs fixos para o radar por posição
@@ -154,6 +198,7 @@ if uploaded_file is not None:
     if st.button("Gerar análise"):
 
         df_filtrado = df[(df["Idade"] >= idade_sel[0]) & (df["Idade"] <= idade_sel[1])]
+        df_filtrado = df[(df["Minutos jogados:"] >= minutesplayed_sel[0]) & (df["Minutos jogados:"] <= minutesplayed_sel[1])]
         if df_filtrado.empty:
             st.warning("Nenhum jogador encontrado com esses filtros.")
         elif not estilos_escolhidos:
