@@ -338,6 +338,11 @@ if uploaded_file is not None:
             df_calculo = df_filtrado_min_total.copy()
             df_calculo['Chave_Unica'] = df_calculo['Jogador'] + " (" + df_calculo['Equipa'] + ")"
             
+            # --- CORREÇÃO DO VALUEERROR (DUPLICATE LABELS) ---
+            # Remove duplicatas da Chave_Unica, mantendo a primeira ocorrência.
+            # Isso garante que o índice será único para o reindex e para os cálculos.
+            df_calculo = df_calculo.drop_duplicates(subset=['Chave_Unica'], keep='first')
+            
             if not df_calculo.empty:
                 chave_unica_disponivel = True
                 options = df_calculo['Chave_Unica'].unique().tolist()
@@ -374,7 +379,6 @@ if uploaded_file is not None:
                 st.error("Não é possível executar a busca. Verifique se as colunas estão corretas e se o jogador selecionado é válido.")
             else:
                 # --- 1. Definir Métricas Segmentadas (Goleiro ou Linha) ---
-                # Esta lógica já é universal e não depende da posição específica (LCB, RB, etc)
                 if tipo_jogador == 'Goleiro':
                         metricas_sim = kpis_por_posicao.get('Goleiro', {}).get('Defendendo', []) + \
                                        kpis_por_posicao.get('Goleiro', {}).get('Posse', [])
@@ -398,6 +402,7 @@ if uploaded_file is not None:
                 if can_proceed:
                     
                     # --- 2. Filtrar Pool de Busca (Segmentado por Tipo) ---
+                    # df_calculo já é único, então pool_busca também será
                     pool_busca = df_calculo.copy()
                     pool_busca = pool_busca[pool_busca['Chave_Unica'] != jogador_referencia_chave]
                     
@@ -416,6 +421,7 @@ if uploaded_file is not None:
                     
                     if can_proceed:
                         # 3. Preparar os dados
+                        # df_sim agora terá um índice único
                         df_sim = pool_busca[['Chave_Unica'] + metricas_sim].set_index('Chave_Unica').fillna(0)
                         ref_data = ref_player_data_row[metricas_sim].fillna(0).iloc[0].to_frame().T
                         
@@ -434,13 +440,13 @@ if uploaded_file is not None:
                         similarity_scores = cosine_similarity(ref_vector_scaled, df_sim_scaled)
                         
                         # 5. Criar DataFrame de Resultados
+                        # df_results agora terá um índice único
                         df_results = pd.DataFrame(similarity_scores.T, index=df_sim_scaled.index, columns=['Similaridade'])
                         
                         
                         # --- CORREÇÃO DO BUG DE 100% ---
                         # O score de similaridade (cosine) para vetores positivos vai de 0 a 1.
                         # Apenas multiplicamos por 100 para ter a porcentagem REAL.
-                        # Removemos o MinMaxScaler que causava o bug.
                         
                         df_results['Similaridade'] = df_results['Similaridade'] * 100
                         # Garante que não passe de 100 (por segurança de float)
@@ -453,8 +459,12 @@ if uploaded_file is not None:
                         top_similares_chaves = df_results.head(5).index.tolist()
                         st.subheader(f"Top 5 Jogadores Mais Similares a: **{jogador_referencia}** (Busca {tipo_jogador})")
                         
+                        # df_calculo já é único
                         df_display = df_calculo[df_calculo['Chave_Unica'].isin(top_similares_chaves)].set_index('Chave_Unica')
+                        
+                        # Esta linha agora vai funcionar sem erros
                         df_display = df_display.reindex(top_similares_chaves)
+                        
                         df_display = df_display.join(df_results, how='left')
                         
                         display_cols = ['Jogador', 'Equipa', 'Idade', 'Posição', 'Similaridade', 'Minutos jogados:']
@@ -471,4 +481,3 @@ if uploaded_file is not None:
                         # ---------------------------------------------------
                         # (REMOVIDO) 7. GRÁFICO SCATTER 
                         # ---------------------------------------------------
-                        # A seção de gráficos scatter foi removida conforme solicitado.
