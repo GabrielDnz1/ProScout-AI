@@ -323,7 +323,7 @@ if uploaded_file is not None:
                         else:
                             st.warning("Não há métricas disponíveis para o radar desta posição.")
 
-# =======================================================
+    # =======================================================
     # PÁGINA 2: PROSCOUT AI (JOGADOR SIMILAR) - UNIVERSAL E ROBUSTA
     # =======================================================
     if page == "Jogador Similar":
@@ -487,131 +487,133 @@ if uploaded_file is not None:
                         # (NOVO) 7. GRÁFICO RADAR COMPARATIVO
                         # ---------------------------------------------------
                         
+                        # --- CORREÇÃO AQUI ---
                         if not top_similares_chaves:
                             st.info("Nenhum jogador similar encontrado para comparar no radar.")
-                            return # Sai se a lista estiver vazia
+                        else: 
+                            # Todo o código do radar vai dentro deste 'else'
+                            
+                            st.subheader(f"Comparativo Visual: {jogador_referencia} vs. {df_display.iloc[0]['Jogador']}")
 
-                        st.subheader(f"Comparativo Visual: {jogador_referencia} vs. {df_display.iloc[0]['Jogador']}")
+                            # 7.1 Obter dados do jogador Top 1 similar
+                            top_similar_data_row = df_calculo[df_calculo['Chave_Unica'] == top_similares_chaves[0]]
 
-                        # 7.1 Obter dados do jogador Top 1 similar
-                        top_similar_data_row = df_calculo[df_calculo['Chave_Unica'] == top_similares_chaves[0]]
+                            # 7.2 Posição (usar a do jogador de referência como base)
+                            posicao_radar = posicao_contexto # Já definido acima
+                            kpis = kpis_por_posicao.get(posicao_radar, {})
 
-                        # 7.2 Posição (usar a do jogador de referência como base)
-                        posicao_radar = posicao_contexto # Já definido acima
-                        kpis = kpis_por_posicao.get(posicao_radar, {})
+                            # 7.3 Calcular Percentis para o Radar
+                            # Precisamos usar o 'df_calculo' que contém todos os jogadores filtrados (idade, minutos)
+                            
+                            todas_metricas_radar = []
+                            for grupo_metrica in kpis.values():
+                                todas_metricas_radar.extend(grupo_metrica)
+                            
+                            metricas_radar_existentes = list(set([m for m in todas_metricas_radar if m in df_calculo.columns]))
+                            
+                            # Usamos df_calculo para o rank, pois ele tem o pool completo de jogadores
+                            df_radar_pct = df_calculo.copy() 
+                            metricas_negativas = ["Golos sofridos/90", "Faltas/90"] # Reutilizar
+                            
+                            for col in metricas_radar_existentes:
+                                pct_col_name = col + "_pct"
+                                if col in metricas_negativas:
+                                    df_radar_pct[pct_col_name] = df_radar_pct[col].rank(pct=True, ascending=False) * 100
+                                else:
+                                    df_radar_pct[pct_col_name] = df_radar_pct[col].rank(pct=True) * 100
 
-                        # 7.3 Calcular Percentis para o Radar
-                        # Precisamos usar o 'df_calculo' que contém todos os jogadores filtrados (idade, minutos)
-                        
-                        todas_metricas_radar = []
-                        for grupo_metrica in kpis.values():
-                            todas_metricas_radar.extend(grupo_metrica)
-                        
-                        metricas_radar_existentes = list(set([m for m in todas_metricas_radar if m in df_calculo.columns]))
-                        
-                        # Usamos df_calculo para o rank, pois ele tem o pool completo de jogadores
-                        df_radar_pct = df_calculo.copy() 
-                        metricas_negativas = ["Golos sofridos/90", "Faltas/90"] # Reutilizar
-                        
-                        for col in metricas_radar_existentes:
-                            pct_col_name = col + "_pct"
-                            if col in metricas_negativas:
-                                df_radar_pct[pct_col_name] = df_radar_pct[col].rank(pct=True, ascending=False) * 100
+                            # 7.4 Obter os valores de percentil para os DOIS jogadores
+                            valores_ref = []
+                            valores_sim = []
+                            metricas_ordenadas = []
+                            slice_colors = []
+                            grupo_cores = {"Atacando": "#FF5733", "Defendendo": "#33FF57", "Posse": "#3375FF"} # Reutilizar
+
+                            # Dados de percentil do jogador de referência
+                            player_ref_pct = df_radar_pct[df_radar_pct['Chave_Unica'] == jogador_referencia_chave]
+                            # Dados de percentil do jogador similar
+                            player_sim_pct = df_radar_pct[df_radar_pct['Chave_Unica'] == top_similares_chaves[0]]
+
+                            if player_ref_pct.empty or player_sim_pct.empty:
+                                st.warning("Não foi possível gerar o radar comparativo (dados de percentil não encontrados).")
                             else:
-                                df_radar_pct[pct_col_name] = df_radar_pct[col].rank(pct=True) * 100
+                                for grupo, metricas in kpis.items():
+                                    for metrica in metricas:
+                                        pct_col = metrica + "_pct"
+                                        if pct_col in df_radar_pct.columns:
+                                            metricas_ordenadas.append(metrica)
+                                            # Valor do jogador de referência
+                                            valor_ref = player_ref_pct[pct_col].values[0]
+                                            valores_ref.append(round(float(valor_ref), 2))
+                                            # Valor do jogador similar
+                                            valor_sim = player_sim_pct[pct_col].values[0]
+                                            valores_sim.append(round(float(valor_sim), 2))
+                                            
+                                            slice_colors.append(grupo_cores.get(grupo, "#999999"))
 
-                        # 7.4 Obter os valores de percentil para os DOIS jogadores
-                        valores_ref = []
-                        valores_sim = []
-                        metricas_ordenadas = []
-                        slice_colors = []
-                        grupo_cores = {"Atacando": "#FF5733", "Defendendo": "#33FF57", "Posse": "#3375FF"} # Reutilizar
+                                # 7.5 Plotar o Gráfico (usando PyPizza)
+                                if metricas_ordenadas:
+                                    try:
+                                        font_normal = FontManager("https://raw.githubusercontent.com/googlefonts/roboto/main/src/hinted/Roboto-Regular.ttf")
+                                        font_bold = FontManager("https://raw.githubusercontent.com/google/fonts/main/apache/robotoslab/RobotoSlab[wght].ttf")
 
-                        # Dados de percentil do jogador de referência
-                        player_ref_pct = df_radar_pct[df_radar_pct['Chave_Unica'] == jogador_referencia_chave]
-                        # Dados de percentil do jogador similar
-                        player_sim_pct = df_radar_pct[df_radar_pct['Chave_Unica'] == top_similares_chaves[0]]
-
-                        if player_ref_pct.empty or player_sim_pct.empty:
-                            st.warning("Não foi possível gerar o radar comparativo (dados de percentil não encontrados).")
-                        else:
-                            for grupo, metricas in kpis.items():
-                                for metrica in metricas:
-                                    pct_col = metrica + "_pct"
-                                    if pct_col in df_radar_pct.columns:
-                                        metricas_ordenadas.append(metrica)
-                                        # Valor do jogador de referência
-                                        valor_ref = player_ref_pct[pct_col].values[0]
-                                        valores_ref.append(round(float(valor_ref), 2))
-                                        # Valor do jogador similar
-                                        valor_sim = player_sim_pct[pct_col].values[0]
-                                        valores_sim.append(round(float(valor_sim), 2))
-                                        
-                                        slice_colors.append(grupo_cores.get(grupo, "#999999"))
-
-                            # 7.5 Plotar o Gráfico (usando PyPizza)
-                            if metricas_ordenadas:
-                                try:
-                                    font_normal = FontManager("https://raw.githubusercontent.com/googlefonts/roboto/main/src/hinted/Roboto-Regular.ttf")
-                                    font_bold = FontManager("https://raw.githubusercontent.com/google/fonts/main/apache/robotoslab/RobotoSlab[wght].ttf")
-
-                                    baker = PyPizza(
-                                        params=metricas_ordenadas,
-                                        background_color="#ffffff",
-                                        straight_line_color="#cccccc",
-                                        straight_line_lw=1,
-                                        last_circle_lw=0,
-                                        other_circle_lw=0,
-                                        inner_circle_size=20
-                                    )
-
-                                    fig, ax = baker.make_pizza(
-                                        valores_ref,              # Valores do Jogador 1 (Referência)
-                                        compare_values=valores_sim, # Valores do Jogador 2 (Similar)
-                                        figsize=(6, 6),
-                                        color_blank_space="same",
-                                        slice_colors=slice_colors, # Cor principal (Referência)
-                                        value_colors=["#000000"] * len(valores_ref),
-                                        
-                                        # Estilo Jogador 1 (Referência)
-                                        kwargs_slices=dict(edgecolor="#ffffff", zorder=2, linewidth=1),
-                                        kwargs_params=dict(color="#000000", fontsize=4, fontproperties=font_normal.prop, va="center"),
-                                        kwargs_values=dict(color="#000000", fontsize=8, fontproperties=font_bold.prop, zorder=3, va="center"),
-                                        
-                                        # Estilo Jogador 2 (Similar)
-                                        compare_color="#800080", # Roxo para o similar
-                                        kwargs_compare=dict(
-                                            facecolor="#800080", edgecolor="#ffffff", zorder=2, linewidth=1, alpha=0.6 # Com transparência
-                                        ),
-                                        kwargs_compare_values=dict(
-                                            color="#800080", fontsize=8, fontproperties=font_bold.prop, zorder=3, va="center", alpha=0.7
+                                        baker = PyPizza(
+                                            params=metricas_ordenadas,
+                                            background_color="#ffffff",
+                                            straight_line_color="#cccccc",
+                                            straight_line_lw=1,
+                                            last_circle_lw=0,
+                                            other_circle_lw=0,
+                                            inner_circle_size=20
                                         )
-                                    )
 
-                                    # Título e Legenda
-                                    ref_nome = ref_player_data_row['Jogador'].iloc[0]
-                                    sim_nome = top_similar_data_row['Jogador'].iloc[0]
-                                    
-                                    fig.text(
-                                        0.5, 0.97,
-                                        f"{ref_nome} (Ref) vs. {sim_nome} (Similar)",
-                                        size=12, ha="center", fontproperties=font_bold.prop, color="#000000"
-                                    )
-                                    
-                                    # Legenda customizada
-                                    fig.text(
-                                        0.35, 0.92,
-                                        f"■ {ref_nome}",
-                                        size=10, ha="center", fontproperties=font_bold.prop, color=slice_colors[0] # Uma cor base
-                                    )
-                                    fig.text(
-                                        0.65, 0.92,
-                                        f"■ {sim_nome}",
-                                        size=10, ha="center", fontproperties=font_bold.prop, color="#800080" # Cor Roxo
-                                    )
+                                        fig, ax = baker.make_pizza(
+                                            valores_ref,              # Valores do Jogador 1 (Referência)
+                                            compare_values=valores_sim, # Valores do Jogador 2 (Similar)
+                                            figsize=(6, 6),
+                                            color_blank_space="same",
+                                            slice_colors=slice_colors, # Cor principal (Referência)
+                                            value_colors=["#000000"] * len(valores_ref),
+                                            
+                                            # Estilo Jogador 1 (Referência)
+                                            kwargs_slices=dict(edgecolor="#ffffff", zorder=2, linewidth=1),
+                                            kwargs_params=dict(color="#000000", fontsize=4, fontproperties=font_normal.prop, va="center"),
+                                            kwargs_values=dict(color="#000000", fontsize=8, fontproperties=font_bold.prop, zorder=3, va="center"),
+                                            
+                                            # Estilo Jogador 2 (Similar)
+                                            compare_color="#800080", # Roxo para o similar
+                                            kwargs_compare=dict(
+                                                facecolor="#800080", edgecolor="#ffffff", zorder=2, linewidth=1, alpha=0.6 # Com transparência
+                                            ),
+                                            kwargs_compare_values=dict(
+                                                color="#800080", fontsize=8, fontproperties=font_bold.prop, zorder=3, va="center", alpha=0.7
+                                            )
+                                        )
 
-                                    st.pyplot(fig)
-                                except Exception as e:
-                                    st.error(f"Erro ao gerar o gráfico de radar comparativo: {e}")
-                            else:
-                                st.warning(f"Não há métricas de radar disponíveis para a posição: {posicao_radar}")
+                                        # Título e Legenda
+                                        ref_nome = ref_player_data_row['Jogador'].iloc[0]
+                                        sim_nome = top_similar_data_row['Jogador'].iloc[0]
+                                        
+                                        fig.text(
+                                            0.5, 0.97,
+                                            f"{ref_nome} (Ref) vs. {sim_nome} (Similar)",
+                                            size=12, ha="center", fontproperties=font_bold.prop, color="#000000"
+                                        )
+                                        
+                                        # Legenda customizada
+                                        fig.text(
+                                            0.35, 0.92,
+                                            f"■ {ref_nome}",
+                                            size=10, ha="center", fontproperties=font_bold.prop, color=slice_colors[0] # Uma cor base
+                                        )
+                                        fig.text(
+                                            0.65, 0.92,
+                                            f"■ {sim_nome}",
+                                            size=10, ha="center", fontproperties=font_bold.prop, color="#800080" # Cor Roxo
+                                        )
+
+                                        st.pyplot(fig)
+                                    except Exception as e:
+                                        st.error(f"Erro ao gerar o gráfico de radar comparativo: {e}")
+                                else:
+                                    st.warning(f"Não há métricas de radar disponíveis para a posição: {posicao_radar}")
