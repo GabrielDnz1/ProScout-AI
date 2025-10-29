@@ -436,12 +436,16 @@ if uploaded_file is not None:
                         # 5. Criar DataFrame de Resultados
                         df_results = pd.DataFrame(similarity_scores.T, index=df_sim_scaled.index, columns=['Similaridade'])
                         
-                        # Normalizar scores para 0-100
-                        scaler_display = MinMaxScaler(feature_range=(0, 100))
-                        if (df_results['Similaridade'].max() - df_results['Similaridade'].min()) > 0:
-                            df_results['Similaridade'] = scaler_display.fit_transform(df_results[['Similaridade']])
-                        else:
-                             df_results['Similaridade'] = 100.0 if df_results['Similaridade'].iloc[0] > 0 else 0.0
+                        
+                        # --- CORREÇÃO DO BUG DE 100% ---
+                        # O score de similaridade (cosine) para vetores positivos vai de 0 a 1.
+                        # Apenas multiplicamos por 100 para ter a porcentagem REAL.
+                        # Removemos o MinMaxScaler que causava o bug.
+                        
+                        df_results['Similaridade'] = df_results['Similaridade'] * 100
+                        # Garante que não passe de 100 (por segurança de float)
+                        df_results['Similaridade'] = df_results['Similaridade'].clip(0, 100) 
+
                         
                         df_results = df_results.sort_values(by='Similaridade', ascending=False)
                         
@@ -465,44 +469,6 @@ if uploaded_file is not None:
                                      )})
 
                         # ---------------------------------------------------
-                        # (NOVO) 7. GRÁFICO SCATTER (COMO VOCÊ SUGERIU)
+                        # (REMOVIDO) 7. GRÁFICO SCATTER 
                         # ---------------------------------------------------
-                        st.subheader("Análise Visual da Similaridade (vs. Idade e Minutos)")
-                        
-                        # 'df_results' tem a similaridade de TODOS os jogadores do pool
-                        # 'df_calculo' tem os dados dos jogadores (idade, min, etc)
-                        
-                        # Juntamos os scores de similaridade com os dados dos jogadores
-                        df_plot_data = df_calculo.join(df_results, on='Chave_Unica', how='inner')
-                        # 'how=inner' garante que só pegamos jogadores que estavam no pool e têm score
-
-                        if df_plot_data.empty:
-                            st.warning("Não há dados suficientes para gerar os gráficos scatter.")
-                        else:
-                            col1, col2 = st.columns(2)
-                            
-                            with col1:
-                                st.write("**Similaridade vs. Idade**")
-                                if 'Idade' in df_plot_data.columns:
-                                    scatter_idade = st.scatter_chart(
-                                        df_plot_data,
-                                        x='Idade',
-                                        y='Similaridade',
-                                        color='Posição', # Usar Posição aqui dá cor, mas NÃO filtra
-                                        tooltip=['Jogador', 'Equipa', 'Posição', 'Idade', 'Similaridade']
-                                    )
-                                else:
-                                    st.info("Coluna 'Idade' não encontrada para o gráfico.")
-
-                            with col2:
-                                st.write("**Similaridade vs. Minutos Jogados**")
-                                if 'Minutos jogados:' in df_plot_data.columns:
-                                    scatter_minutos = st.scatter_chart(
-                                        df_plot_data,
-                                        x='Minutos jogados:',
-                                        y='Similaridade',
-                                        color='Posição', # Usar Posição aqui dá cor, mas NÃO filtra
-                                        tooltip=['Jogador', 'Equipa', 'Posição', 'Minutos jogados:', 'Similaridade']
-                                    )
-                                else:
-                                    st.info("Coluna 'Minutos jogados:' não encontrada para o gráfico.")
+                        # A seção de gráficos scatter foi removida conforme solicitado.
