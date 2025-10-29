@@ -356,26 +356,26 @@ if uploaded_file is not None:
             ref_player_data_row = df_calculo[df_calculo['Chave_Unica'] == jogador_referencia_chave]
             if not ref_player_data_row.empty:
                 jogador_referencia = ref_player_data_row['Jogador'].iloc[0]
-                posicao_contexto = ref_player_data_row['Posição'].iloc[0]
+                posicao_contexto = ref_player_data_row['Posição'].iloc[0] # Posição bruta (ex: LCB)
                 
                 # Detecção do TIPO de jogador (Goleiro vs Linha)
-                tipo_jogador = 'Goleiro' if posicao_contexto == 'Goleiro' else 'Linha'
+                # A única separação de "posição" que mantemos é Goleiro vs Linha
+                tipo_jogador = 'Goleiro' if posicao_contexto == 'Goleiro' else 'Linha' 
                 
                 st.info(f"O jogador de referência '{jogador_referencia}' joga como: **{posicao_contexto}** (A busca será segmentada por **{tipo_jogador}**).")
             else:
                  jogador_referencia = None
                  st.warning("Jogador de referência não encontrado no conjunto de dados filtrado. Tente ajustar os filtros.")
         
-        # REMOVIDO: O seletor de Mínimo de Minutos (item 2)
         
         if st.button("Buscar Jogadores Similares") and jogador_referencia is not None:
             
             if not chave_unica_disponivel or ref_player_data_row is None:
                 st.error("Não é possível executar a busca. Verifique se as colunas estão corretas e se o jogador selecionado é válido.")
             else:
-                # --- 1. Definir Métricas Segmentadas ---
+                # --- 1. Definir Métricas Segmentadas (Goleiro ou Linha) ---
+                # Esta lógica já é universal e não depende da posição específica (LCB, RB, etc)
                 if tipo_jogador == 'Goleiro':
-                        # Usa APENAS métricas de goleiro
                         metricas_sim = kpis_por_posicao.get('Goleiro', {}).get('Defendendo', []) + \
                                        kpis_por_posicao.get('Goleiro', {}).get('Posse', [])
                 else:
@@ -398,16 +398,13 @@ if uploaded_file is not None:
                 if can_proceed:
                     
                     # --- 2. Filtrar Pool de Busca (Segmentado por Tipo) ---
-                    pool_busca = df_calculo.copy() # DataFrame com Chave_Unica
-                    pool_busca = pool_busca[pool_busca['Chave_Unica'] != jogador_referencia_chave] # Remove o próprio
+                    pool_busca = df_calculo.copy()
+                    pool_busca = pool_busca[pool_busca['Chave_Unica'] != jogador_referencia_chave]
                     
-                    # Filtra o pool de busca pelo tipo de jogador (Goleiro ou Linha)
                     if tipo_jogador == 'Goleiro':
                         pool_busca = pool_busca[pool_busca['Posição'] == 'Goleiro'].copy()
                     else:
                         pool_busca = pool_busca[pool_busca['Posição'] != 'Goleiro'].copy()
-                    
-                    # Extrair o dado de referência (já temos em ref_player_data_row)
                     
                     if ref_player_data_row.empty:
                         st.error(f"Erro: Jogador '{jogador_referencia_chave}' não encontrado no pool de dados.")
@@ -418,14 +415,13 @@ if uploaded_file is not None:
                         can_proceed = False
                     
                     if can_proceed:
-                        # 3. Preparar os dados (usando Chave_Unica como índice)
+                        # 3. Preparar os dados
                         df_sim = pool_busca[['Chave_Unica'] + metricas_sim].set_index('Chave_Unica').fillna(0)
                         ref_data = ref_player_data_row[metricas_sim].fillna(0).iloc[0].to_frame().T
                         
                         scaler_sim = StandardScaler()
                         
                         if len(df_sim) > 1:
-                            # Escalonamento se houver dados suficientes no pool
                             df_sim_scaled = scaler_sim.fit_transform(df_sim)
                             df_sim_scaled = pd.DataFrame(df_sim_scaled, columns=metricas_sim, index=df_sim.index)
                             ref_vector_scaled = scaler_sim.transform(ref_data).reshape(1, -1)
@@ -434,47 +430,32 @@ if uploaded_file is not None:
                             df_sim_scaled = df_sim
                             ref_vector_scaled = ref_data.values.reshape(1, -1)
                             
-    
-                        # 4. Calcular Similaridade (Cosine Similarity)
+                        # 4. Calcular Similaridade
                         similarity_scores = cosine_similarity(ref_vector_scaled, df_sim_scaled)
                         
-                        # 5. Criar DataFrame de Resultados (indexado pela Chave Única)
+                        # 5. Criar DataFrame de Resultados
                         df_results = pd.DataFrame(similarity_scores.T, index=df_sim_scaled.index, columns=['Similaridade'])
                         
-                        # CONVERTE SIMILARIDADE DE [-1, 1] (cosine) PARA [0, 100]
-                        # Um scaler simples (MinMaxScaler) é mais robusto que multiplicar por 100
+                        # Normalizar scores para 0-100
                         scaler_display = MinMaxScaler(feature_range=(0, 100))
-                        
-                        # Se todos os scores forem iguais (ex: 0 ou 1), o fit falha.
                         if (df_results['Similaridade'].max() - df_results['Similaridade'].min()) > 0:
                             df_results['Similaridade'] = scaler_display.fit_transform(df_results[['Similaridade']])
                         else:
-                             # Se todos os valores são iguais, podemos apenas setar para 100 ou 0
                              df_results['Similaridade'] = 100.0 if df_results['Similaridade'].iloc[0] > 0 else 0.0
-
                         
                         df_results = df_results.sort_values(by='Similaridade', ascending=False)
                         
-                        # Obtém as CHAVES ÚNICAS dos top 5
+                        # 6. Exibir Resultados (Tabela)
                         top_similares_chaves = df_results.head(5).index.tolist()
-                        
-                        # 6. Exibir Resultados
                         st.subheader(f"Top 5 Jogadores Mais Similares a: **{jogador_referencia}** (Busca {tipo_jogador})")
                         
-                        # Pega as linhas dos jogadores similares
                         df_display = df_calculo[df_calculo['Chave_Unica'].isin(top_similares_chaves)].set_index('Chave_Unica')
-                        
-                        # Reordena e mescla a pontuação de similaridade
                         df_display = df_display.reindex(top_similares_chaves)
                         df_display = df_display.join(df_results, how='left')
                         
-                        # Colunas relevantes para o display final
                         display_cols = ['Jogador', 'Equipa', 'Idade', 'Posição', 'Similaridade', 'Minutos jogados:']
-                        
-                        # Filtra colunas que realmente existem no df_display
                         df_display = df_display[[col for col in display_cols if col in df_display.columns]].round(2)
                         
-                        # Exibe a similaridade como porcentagem de 0 a 100 com barra de progresso
                         st.dataframe(df_display, 
                                      column_config={"Similaridade": st.column_config.ProgressColumn(
                                          "Similaridade (%)", 
@@ -484,136 +465,44 @@ if uploaded_file is not None:
                                      )})
 
                         # ---------------------------------------------------
-                        # (NOVO) 7. GRÁFICO RADAR COMPARATIVO
+                        # (NOVO) 7. GRÁFICO SCATTER (COMO VOCÊ SUGERIU)
                         # ---------------------------------------------------
+                        st.subheader("Análise Visual da Similaridade (vs. Idade e Minutos)")
                         
-                        # --- CORREÇÃO AQUI ---
-                        if not top_similares_chaves:
-                            st.info("Nenhum jogador similar encontrado para comparar no radar.")
-                        else: 
-                            # Todo o código do radar vai dentro deste 'else'
-                            
-                            st.subheader(f"Comparativo Visual: {jogador_referencia} vs. {df_display.iloc[0]['Jogador']}")
+                        # 'df_results' tem a similaridade de TODOS os jogadores do pool
+                        # 'df_calculo' tem os dados dos jogadores (idade, min, etc)
+                        
+                        # Juntamos os scores de similaridade com os dados dos jogadores
+                        df_plot_data = df_calculo.join(df_results, on='Chave_Unica', how='inner')
+                        # 'how=inner' garante que só pegamos jogadores que estavam no pool e têm score
 
-                            # 7.1 Obter dados do jogador Top 1 similar
-                            top_similar_data_row = df_calculo[df_calculo['Chave_Unica'] == top_similares_chaves[0]]
-
-                            # 7.2 Posição (usar a do jogador de referência como base)
-                            posicao_radar = posicao_contexto # Já definido acima
-                            kpis = kpis_por_posicao.get(posicao_radar, {})
-
-                            # 7.3 Calcular Percentis para o Radar
-                            # Precisamos usar o 'df_calculo' que contém todos os jogadores filtrados (idade, minutos)
+                        if df_plot_data.empty:
+                            st.warning("Não há dados suficientes para gerar os gráficos scatter.")
+                        else:
+                            col1, col2 = st.columns(2)
                             
-                            todas_metricas_radar = []
-                            for grupo_metrica in kpis.values():
-                                todas_metricas_radar.extend(grupo_metrica)
-                            
-                            metricas_radar_existentes = list(set([m for m in todas_metricas_radar if m in df_calculo.columns]))
-                            
-                            # Usamos df_calculo para o rank, pois ele tem o pool completo de jogadores
-                            df_radar_pct = df_calculo.copy() 
-                            metricas_negativas = ["Golos sofridos/90", "Faltas/90"] # Reutilizar
-                            
-                            for col in metricas_radar_existentes:
-                                pct_col_name = col + "_pct"
-                                if col in metricas_negativas:
-                                    df_radar_pct[pct_col_name] = df_radar_pct[col].rank(pct=True, ascending=False) * 100
+                            with col1:
+                                st.write("**Similaridade vs. Idade**")
+                                if 'Idade' in df_plot_data.columns:
+                                    scatter_idade = st.scatter_chart(
+                                        df_plot_data,
+                                        x='Idade',
+                                        y='Similaridade',
+                                        color='Posição', # Usar Posição aqui dá cor, mas NÃO filtra
+                                        tooltip=['Jogador', 'Equipa', 'Posição', 'Idade', 'Similaridade']
+                                    )
                                 else:
-                                    df_radar_pct[pct_col_name] = df_radar_pct[col].rank(pct=True) * 100
+                                    st.info("Coluna 'Idade' não encontrada para o gráfico.")
 
-                            # 7.4 Obter os valores de percentil para os DOIS jogadores
-                            valores_ref = []
-                            valores_sim = []
-                            metricas_ordenadas = []
-                            slice_colors = []
-                            grupo_cores = {"Atacando": "#FF5733", "Defendendo": "#33FF57", "Posse": "#3375FF"} # Reutilizar
-
-                            # Dados de percentil do jogador de referência
-                            player_ref_pct = df_radar_pct[df_radar_pct['Chave_Unica'] == jogador_referencia_chave]
-                            # Dados de percentil do jogador similar
-                            player_sim_pct = df_radar_pct[df_radar_pct['Chave_Unica'] == top_similares_chaves[0]]
-
-                            if player_ref_pct.empty or player_sim_pct.empty:
-                                st.warning("Não foi possível gerar o radar comparativo (dados de percentil não encontrados).")
-                            else:
-                                for grupo, metricas in kpis.items():
-                                    for metrica in metricas:
-                                        pct_col = metrica + "_pct"
-                                        if pct_col in df_radar_pct.columns:
-                                            metricas_ordenadas.append(metrica)
-                                            # Valor do jogador de referência
-                                            valor_ref = player_ref_pct[pct_col].values[0]
-                                            valores_ref.append(round(float(valor_ref), 2))
-                                            # Valor do jogador similar
-                                            valor_sim = player_sim_pct[pct_col].values[0]
-                                            valores_sim.append(round(float(valor_sim), 2))
-                                            
-                                            slice_colors.append(grupo_cores.get(grupo, "#999999"))
-
-                                # 7.5 Plotar o Gráfico (usando PyPizza)
-                                if metricas_ordenadas:
-                                    try:
-                                        font_normal = FontManager("https://raw.githubusercontent.com/googlefonts/roboto/main/src/hinted/Roboto-Regular.ttf")
-                                        font_bold = FontManager("https://raw.githubusercontent.com/google/fonts/main/apache/robotoslab/RobotoSlab[wght].ttf")
-
-                                        baker = PyPizza(
-                                            params=metricas_ordenadas,
-                                            background_color="#ffffff",
-                                            straight_line_color="#cccccc",
-                                            straight_line_lw=1,
-                                            last_circle_lw=0,
-                                            other_circle_lw=0,
-                                            inner_circle_size=20
-                                        )
-
-                                        fig, ax = baker.make_pizza(
-                                            valores_ref,              # Valores do Jogador 1 (Referência)
-                                            compare_values=valores_sim, # Valores do Jogador 2 (Similar)
-                                            figsize=(6, 6),
-                                            color_blank_space="same",
-                                            slice_colors=slice_colors, # Cor principal (Referência)
-                                            value_colors=["#000000"] * len(valores_ref),
-                                            
-                                            # Estilo Jogador 1 (Referência)
-                                            kwargs_slices=dict(edgecolor="#ffffff", zorder=2, linewidth=1),
-                                            kwargs_params=dict(color="#000000", fontsize=4, fontproperties=font_normal.prop, va="center"),
-                                            kwargs_values=dict(color="#000000", fontsize=8, fontproperties=font_bold.prop, zorder=3, va="center"),
-                                            
-                                            # Estilo Jogador 2 (Similar)
-                                            compare_color="#800080", # Roxo para o similar
-                                            kwargs_compare=dict(
-                                                facecolor="#800080", edgecolor="#ffffff", zorder=2, linewidth=1, alpha=0.6 # Com transparência
-                                            ),
-                                            kwargs_compare_values=dict(
-                                                color="#800080", fontsize=8, fontproperties=font_bold.prop, zorder=3, va="center", alpha=0.7
-                                            )
-                                        )
-
-                                        # Título e Legenda
-                                        ref_nome = ref_player_data_row['Jogador'].iloc[0]
-                                        sim_nome = top_similar_data_row['Jogador'].iloc[0]
-                                        
-                                        fig.text(
-                                            0.5, 0.97,
-                                            f"{ref_nome} (Ref) vs. {sim_nome} (Similar)",
-                                            size=12, ha="center", fontproperties=font_bold.prop, color="#000000"
-                                        )
-                                        
-                                        # Legenda customizada
-                                        fig.text(
-                                            0.35, 0.92,
-                                            f"■ {ref_nome}",
-                                            size=10, ha="center", fontproperties=font_bold.prop, color=slice_colors[0] # Uma cor base
-                                        )
-                                        fig.text(
-                                            0.65, 0.92,
-                                            f"■ {sim_nome}",
-                                            size=10, ha="center", fontproperties=font_bold.prop, color="#800080" # Cor Roxo
-                                        )
-
-                                        st.pyplot(fig)
-                                    except Exception as e:
-                                        st.error(f"Erro ao gerar o gráfico de radar comparativo: {e}")
+                            with col2:
+                                st.write("**Similaridade vs. Minutos Jogados**")
+                                if 'Minutos jogados:' in df_plot_data.columns:
+                                    scatter_minutos = st.scatter_chart(
+                                        df_plot_data,
+                                        x='Minutos jogados:',
+                                        y='Similaridade',
+                                        color='Posição', # Usar Posição aqui dá cor, mas NÃO filtra
+                                        tooltip=['Jogador', 'Equipa', 'Posição', 'Minutos jogados:', 'Similaridade']
+                                    )
                                 else:
-                                    st.warning(f"Não há métricas de radar disponíveis para a posição: {posicao_radar}")
+                                    st.info("Coluna 'Minutos jogados:' não encontrada para o gráfico.")
