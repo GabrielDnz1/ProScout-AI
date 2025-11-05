@@ -327,7 +327,7 @@ if uploaded_file is not None:
     # PÁGINA 2: PROSCOUT AI (JOGADOR SIMILAR) - UNIVERSAL E ROBUSTA
     # =======================================================
     if page == "Jogador Similar":
-        st.header("🔍 Encontre Jogadores Similares (AI Similarity - Busca Universal Segmentada)")
+        st.header("🔍 Encontre Jogadores Similares (Similaridade do Cosseno)")
         
         # --- 0. Preparação e Criação de Chave Única ---
         chave_unica_disponivel = False
