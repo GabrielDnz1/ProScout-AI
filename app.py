@@ -12,7 +12,7 @@ st.title("PROScout AI")
 
 # --- Link de Download para a Base Modelo ---
 # Oferece ao usuário um link direto para baixar um arquivo de exemplo, útil para testar a aplicação.
-st.markdown("🔗 **Baixe o arquivo modelo - Todos os Jogadores do brasileirão com mais de 500 minutos (Wyscout CSV):** [Modelo de Base de Dados](https://drive.google.com/file/d/1ohP0Jf0Sx3C5ILwvSXuOTXEUGGiMHNq/view?usp=sharing)")
+st.markdown("🔗 **Baixe o arquivo modelo - Todos os Jogadores do brasileirão com mais de 500 minutos (Wyscout CSV):** [Modelo de Base de Dados](https://drive.google.com/file/d/1ohP0Jfv0Sx3C5ILwvSXuOTXEUGGiMHNq/view?usp=sharing)")
 # ---------------------------------------------
 
 # Permite ao usuário carregar a própria base de dados
