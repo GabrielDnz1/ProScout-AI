@@ -2,34 +2,40 @@ import streamlit as st
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 from mplsoccer import PyPizza, FontManager
-# --- Importações de Scikit-learn ---
+# --- Importações para a Análise de Similaridade ---
 from sklearn.preprocessing import StandardScaler 
 from sklearn.metrics.pairwise import cosine_similarity 
-# -----------------------------------
+# --------------------------------------------------
 
 st.set_page_config(layout="wide")
 st.title("PROScout AI")
 
-# --- NOVO LINK DE DOWNLOAD ADICIONADO AQUI ---
-st.markdown("🔗 **Baixe o arquivo modelo - Todos os Jogadores do brasileirão com mais de 500 minutos (Wyscout CSV):** [Modelo de Base de Dados](https://drive.google.com/file/d/1ohP0Jfv0Sx3C5ILwvSXuOTXEUGGiMHNq/view?usp=sharing)")
+# --- Link de Download para a Base Modelo ---
+# Oferece ao usuário um link direto para baixar um arquivo de exemplo, útil para testar a aplicação.
+st.markdown("🔗 **Baixe o arquivo modelo - Todos os Jogadores do brasileirão com mais de 500 minutos (Wyscout CSV):** [Modelo de Base de Dados](https://drive.google.com/file/d/1ohP0Jf0Sx3C5ILwvSXuOTXEUGGiMHNq/view?usp=sharing)")
 # ---------------------------------------------
 
+# Permite ao usuário carregar a própria base de dados
 uploaded_file = st.file_uploader("📂 Carregue um arquivo CSV ou XLSX", type=["csv", "xlsx"])
+# Menu lateral para alternar entre as funcionalidades da AI
 page = st.sidebar.radio("Selecione a Ferramenta AI", ["Análise de Estilos", "Jogador Similar"]) 
 
 if uploaded_file is not None:
 
     # -------------------------------
-    # Ler CSV ou XLSX
+    # Carregamento e Limpeza Inicial dos Dados
     # -------------------------------
+    # Identifica o tipo de arquivo (.csv ou .xlsx) e carrega para um DataFrame do pandas.
     if uploaded_file.name.endswith(".csv"):
         df = pd.read_csv(uploaded_file)
     else:
         df = pd.read_excel(uploaded_file)
 
+    # Remove colunas duplicadas que podem surgir de bases de dados mal formatadas.
     df = df.loc[:, ~df.columns.duplicated()]
 
-    # Converter números com vírgula -> ponto
+    # Trata a formatação de números com vírgula: substitui ',' por '.' e converte para float.
+    # Essencial para garantir que as métricas sejam reconhecidas como numéricas para os cálculos.
     for col in df.columns:
         if df[col].dtype == "object":
             try:
@@ -39,15 +45,16 @@ if uploaded_file is not None:
                 pass 
 
     # -------------------------------
-    # Filtros Comuns
+    # Interface e Aplicação de Filtros de Idade e Minutos
     # -------------------------------
     col1_idade, col2_min = st.columns(2)
     
-    # Valores default caso as colunas não existam
+    # Define valores padrão para os filtros caso as colunas necessárias não existam.
     idade_sel = (0, 100)
     minutesplayed_sel = (0, 99999)
 
     with col1_idade:
+        # Exibe o slider de idade se a coluna estiver presente e for numérica.
         if "Idade" in df.columns and df["Idade"].dtype in ['int64', 'float64']:
             idade_min, idade_max = int(df["Idade"].min()), int(df["Idade"].max())
             idade_sel = st.slider("Idade do jogador", idade_min, idade_max, (idade_min, idade_max))
@@ -55,13 +62,14 @@ if uploaded_file is not None:
             st.warning("Coluna 'Idade' não encontrada ou não é numérica. Filtro desativado.")
 
     with col2_min:
+        # Exibe o slider de minutos jogados se a coluna estiver presente e for numérica.
         if "Minutos jogados:" in df.columns and df["Minutos jogados:"].dtype in ['int64', 'float64']:
             minplayed_min, minplayed = int(df["Minutos jogados:"].min()), int(df["Minutos jogados:"].max())
             minutesplayed_sel = st.slider("Minutos do jogador na temporada", minplayed_min, minplayed, (minplayed_min, minplayed))
         else:
             st.warning("Coluna 'Minutos jogados:' não encontrada ou não é numérica. Filtro desativado.")
     
-    # Aplica os filtros na base de dados
+    # Cria uma cópia da base de dados e aplica os filtros de idade e minutos selecionados.
     df_temp = df.copy()
     if "Idade" in df_temp.columns:
         df_temp = df_temp[(df_temp["Idade"] >= idade_sel[0]) & (df_temp["Idade"] <= idade_sel[1])]
@@ -71,11 +79,13 @@ if uploaded_file is not None:
         df_filtrado_min_total = df_temp.copy()
     
     # -------------------------------
-    # Mapeamentos de Estilos, Métricas e Pesos (DEFINIÇÕES)
+    # Dicionários de Configuração da AI (Estilos, Métricas e Pesos)
     # -------------------------------
+    # Lista das principais posições para exibição no filtro.
     posicoes_fixas = ["Goleiro", "Lateral", "Zagueiro", "Volante", 
-                     "Meia-Central", "Meia-Ofensivo", "Extremo", "Centroavante"]
+                      "Meia-Central", "Meia-Ofensivo", "Extremo", "Centroavante"]
     
+    # Mapeamento de quais 'Estilos de Jogo' estão disponíveis para cada Posição.
     estilos_pos = {
         "Centroavante": ["Finalizador", "Pressionador", "Dominador Aéreo", "Movimentador", "Assistente"],
         "Extremo": ["Driblador", "Finalizador", "Cruzador", "Acelerador", "Assistente"],
@@ -87,6 +97,7 @@ if uploaded_file is not None:
         "Goleiro": ["Shot Stopper", "Sweeper Keeper", "Distribuidor"]
     }
 
+    # Define as métricas (KPIs) necessárias para calcular a performance em cada 'Estilo de Jogo'.
     metricas_por_estilo = {
         "Shot Stopper": ["Defesas, %", "Golos sofridos/90", "Golos expectáveis defendidos por 90´"],
         "Sweeper Keeper": ["Saídas/90", "Duelos aéreos/90", "Duelos aéreos ganhos, %"],
@@ -109,7 +120,8 @@ if uploaded_file is not None:
         "Especialista em Bola Parada": ["Assistências por bola parada/90", "Passes chave por bola parada/90"],
     }
     
-    # Dicionário de Pesos para o Score (Ponderação) - Usado na Análise de Estilos
+    # Pesos definidos para cada métrica dentro de um Estilo. Usado para calcular o 'Score Ponderado'.
+    # Um peso maior (ex: 3.0) indica uma métrica mais crítica para aquele estilo.
     pesos_por_estilo = {
         "Construtor": {"Passes certos, %": 3.0, "Passes progressivos certos, %": 2.5, "Passes progressivos/90": 1.5, "Passes/90": 1.0,},
         "Assistente": {"Assistências/90": 3.0, "Passes chave/90": 2.5, "Assistências esperadas/90": 2.0, "Passes inteligentes certos, %": 1.5,},
@@ -131,7 +143,7 @@ if uploaded_file is not None:
         "Sweeper Keeper": {"Saídas/90": 2.0, "Duelos aéreos ganhos, %": 3.0, "Duelos aéreos/90": 1.0,},
     }
     
-    # KPIs fixos para o radar por posição (e para similaridade)
+    # KPIs agrupados para a visualização no Gráfico de Radar (Pizza Plot) e para a Similaridade.
     kpis_por_posicao = {
         "Goleiro": {
             "Defendendo": ["Defesas, %", "Golos sofridos/90", "Golos sofridos esperados/90", "Golos expectáveis defendidos por 90´", "Remates sofridos/90", "Jogos sem sofrer golos"],
@@ -177,13 +189,15 @@ if uploaded_file is not None:
     if page == "Análise de Estilos":
         st.header("Análise de Estilos de Jogadores (Score Ponderado)")
 
+        # Seleção da posição, usada para definir os estilos disponíveis e o radar.
         posicao_sel = st.selectbox("Selecione a posição (apenas para o gráfico)", posicoes_fixas)
 
+        # Seleção dos estilos, exibindo apenas os válidos para a posição escolhida.
         estilos_validos = estilos_pos.get(posicao_sel, [])
         estilos_escolhidos = st.multiselect("Selecione os estilos", estilos_validos)
 
         # -------------------------------
-        # Botão gerar análise
+        # Botão para Iniciar o Cálculo e Análise
         # -------------------------------
         if st.button("Gerar análise"):
 
@@ -192,10 +206,11 @@ if uploaded_file is not None:
             elif not estilos_escolhidos:
                 st.warning("Selecione pelo menos um estilo para análise.")
             else:
-                # Métricas selecionadas pelos estilos
+                # Coleta todas as métricas dos estilos escolhidos.
                 metricas = []
                 for estilo in estilos_escolhidos:
                     metricas.extend(metricas_por_estilo.get(estilo, []))
+                # Filtra as métricas para incluir apenas as que existem na base de dados.
                 metricas_existentes = list(set([m for m in metricas if m in df_filtrado_min_total.columns])) # Usa set para remover duplicatas
                 
                 df_pos = df_filtrado_min_total.copy()
@@ -203,63 +218,67 @@ if uploaded_file is not None:
                 if not metricas_existentes:
                     st.warning("Nenhuma métrica válida encontrada no dataset para os estilos selecionados.")
                 else:
-                    # Métrica para ranqueamento invertido
+                    # Lista de métricas em que um valor MENOR é melhor (para inverter o ranqueamento).
                     metricas_negativas = ["Golos sofridos/90", "Faltas/90"] 
                     
-                    # Gerar percentuais para métricas dos estilos
+                    # Gera os percentis (rankings de 0 a 100) para cada métrica em relação aos outros jogadores.
                     for col in metricas_existentes:
                         if col in metricas_negativas:
+                            # Inverte o ranqueamento (ex: menos Gols Sofridos = percentil mais alto)
                             df_pos[col + "_pct"] = df_pos[col].rank(pct=True, ascending=False) * 100
                         else:
+                            # Ranqueamento normal (mais Dribles = percentil mais alto)
                             df_pos[col + "_pct"] = df_pos[col].rank(pct=True) * 100
 
                     # ---------------------------------------------
                     # CÁLCULO DE SCORE COM PESOS (Ponderação)
                     # ---------------------------------------------
                     
+                    # Agrega os pesos de todas as métricas dos estilos selecionados.
                     pesos_finais = {}
                     for estilo in estilos_escolhidos:
                         pesos_estilo = pesos_por_estilo.get(estilo, {})
                         
-                        # Tenta coletar pesos de estilos genéricos
                         if not pesos_estilo:
                             pesos_estilo = pesos_por_estilo.get(estilo, {})
                         
-                        # Adiciona os pesos das métricas
+                        # Atribui o peso à métrica (mantendo o maior peso se for de múltiplos estilos)
                         for metrica, peso in pesos_estilo.items():
                             if metrica in metricas_existentes:
-                                # Usa o maior peso se a métrica for relevante para múltiplos estilos
                                 pesos_finais[metrica] = max(pesos_finais.get(metrica, 0.0), peso)
                             
                     df_pos["Score Ponderado"] = 0.0
                     soma_pesos = sum(pesos_finais.values())
                     
                     if soma_pesos > 0:
+                        # Calcula o score: soma dos percentis ponderados pela importância (peso) da métrica.
                         for metrica, peso in pesos_finais.items():
                             df_pos["Score Ponderado"] += df_pos[metrica + "_pct"] * peso
                             
+                        # Normaliza para um score final de 0 a 100.
                         df_pos["Score"] = df_pos["Score Ponderado"] / soma_pesos
                     else:
-                        # Fallback para média simples (original) se não houver pesos definidos
+                        # Fallback: média simples se não houver pesos definidos.
                         df_pos["Score"] = df_pos[[c+"_pct" for c in metricas_existentes]].mean(axis=1)
 
+                    # Classifica os jogadores pelo score final e exibe os resultados na tabela.
                     df_final = df_pos.sort_values(by="Score", ascending=False)
                     
                     st.dataframe(df_final[["Jogador", "Equipa", "Idade", "Score"] + metricas_existentes].round(1))
 
 
                     # -------------------------------
-                    # Radar do melhor jogador
+                    # Geração do Gráfico de Radar (Pizza Plot) para o Melhor Jogador
                     # -------------------------------
                     
-                    # 1. Lista de todas as métricas que podem ir no radar (para calcular os percentis)
+                    # 1. Coleta todas as métricas necessárias para o radar de qualquer posição.
                     todas_metricas_radar = []
                     for kpis_pos in kpis_por_posicao.values():
                         for grupo_metrica in kpis_pos.values():
                             todas_metricas_radar.extend(grupo_metrica)
                     todas_metricas_radar = list(set([m for m in todas_metricas_radar if m in df_final.columns]))
                     
-                    # 2. Aplicar ranqueamento (percentil) para o radar
+                    # 2. Garante que os percentis para o radar estejam calculados (incluindo as não usadas no score).
                     metricas_negativas = ["Golos sofridos/90", "Faltas/90"] 
                     for col in todas_metricas_radar:
                         if col + "_pct" not in df_final.columns: # Não recalcular o que já existe
@@ -271,9 +290,11 @@ if uploaded_file is not None:
                     if df_final.empty:
                         st.warning("Não há jogadores para plotar no radar.")
                     else:
+                        # Seleciona o jogador com o maior Score Ponderado
                         top_player = df_final.iloc[0]
                         st.subheader(f"Jogador Sugerido - {top_player.get('Jogador', 'N/A')} ({posicao_sel})")
 
+                        # Prepara os dados do jogador (métricas e cores) para o radar.
                         kpis = kpis_por_posicao.get(posicao_sel, {})
                         metricas_ordenadas = []
                         valores = []
@@ -289,6 +310,7 @@ if uploaded_file is not None:
                                     valores.append(round(float(valor), 2))
                                     slice_colors.append(grupo_cores.get(grupo, "#999999"))
 
+                        # Cria e exibe o gráfico de radar PyPizza.
                         if metricas_ordenadas:
                             try:
                                 font_normal = FontManager("https://raw.githubusercontent.com/googlefonts/roboto/main/src/hinted/Roboto-Regular.ttf")
@@ -328,7 +350,7 @@ if uploaded_file is not None:
                             st.warning("Não há métricas disponíveis para o radar desta posição.")
 
     # =======================================================
-    # PÁGINA 2: PROSCOUT AI (JOGADOR SIMILAR) - UNIVERSAL E ROBUSTA
+    # PÁGINA 2: ENCONTRAR JOGADOR SIMILAR
     # =======================================================
     if page == "Jogador Similar":
         st.header("🔍 Encontre Jogadores Similares (AI Similarity - Busca Universal Segmentada)")
@@ -338,13 +360,13 @@ if uploaded_file is not None:
         options = ['-- Colunas ' + ', '.join(['Jogador', 'Equipa', 'Posição']) + ' não encontradas --']
         jogador_referencia = None
         
+        # Verifica se as colunas essenciais para a busca estão presentes.
         if 'Jogador' in df.columns and 'Equipa' in df.columns and 'Posição' in df.columns:
             df_calculo = df_filtrado_min_total.copy()
+            # Cria a chave única "Jogador (Equipa)" para evitar nomes repetidos no seletor.
             df_calculo['Chave_Unica'] = df_calculo['Jogador'] + " (" + df_calculo['Equipa'] + ")"
             
-            # --- CORREÇÃO DO VALUEERROR (DUPLICATE LABELS) ---
-            # Remove duplicatas da Chave_Unica, mantendo a primeira ocorrência.
-            # Isso garante que o índice será único para o reindex e para os cálculos.
+            # Garante que cada jogador/equipe tenha uma única linha para evitar erros de índice.
             df_calculo = df_calculo.drop_duplicates(subset=['Chave_Unica'], keep='first')
             
             if not df_calculo.empty:
@@ -354,27 +376,27 @@ if uploaded_file is not None:
                 if not options:
                     options = ['-- Nenhum jogador elegível --']
 
-        # O seletor AGORA É SEMPRE EXIBIDO
+        # Seletor para escolher o jogador-modelo para a busca de similaridade.
         jogador_referencia_chave = st.selectbox("1. Selecione o Jogador de Referência (Nome + Equipa):", options)
 
         ref_player_data_row = None # Inicializa para guardar dados do jogador ref
         posicao_contexto = None
         tipo_jogador = None
 
+        # Processa a seleção do jogador, define a posição e o "Tipo" (Goleiro ou Linha) para segmentar a busca.
         if chave_unica_disponivel and jogador_referencia_chave != '-- Nenhum jogador elegível --' and jogador_referencia_chave in df_calculo['Chave_Unica'].values:
             ref_player_data_row = df_calculo[df_calculo['Chave_Unica'] == jogador_referencia_chave]
             if not ref_player_data_row.empty:
                 jogador_referencia = ref_player_data_row['Jogador'].iloc[0]
                 posicao_contexto = ref_player_data_row['Posição'].iloc[0] # Posição bruta (ex: LCB)
                 
-                # Detecção do TIPO de jogador (Goleiro vs Linha)
-                # A única separação de "posição" que mantemos é Goleiro vs Linha
+                # A similaridade será comparada apenas entre Goleiros OU Jogadores de Linha.
                 tipo_jogador = 'Goleiro' if posicao_contexto == 'Goleiro' else 'Linha' 
                 
                 st.info(f"O jogador de referência '{jogador_referencia}' joga como: **{posicao_contexto}** (A busca será segmentada por **{tipo_jogador}**).")
             else:
-                 jogador_referencia = None
-                 st.warning("Jogador de referência não encontrado no conjunto de dados filtrado. Tente ajustar os filtros.")
+                jogador_referencia = None
+                st.warning("Jogador de referência não encontrado no conjunto de dados filtrado. Tente ajustar os filtros.")
         
         
         if st.button("Buscar Jogadores Similares") and jogador_referencia is not None:
@@ -384,32 +406,35 @@ if uploaded_file is not None:
             else:
                 # --- 1. Definir Métricas Segmentadas (Goleiro ou Linha) ---
                 if tipo_jogador == 'Goleiro':
-                        metricas_sim = kpis_por_posicao.get('Goleiro', {}).get('Defendendo', []) + \
-                                       kpis_por_posicao.get('Goleiro', {}).get('Posse', [])
+                    # Usa as métricas de defesa e posse de bola do goleiro.
+                    metricas_sim = kpis_por_posicao.get('Goleiro', {}).get('Defendendo', []) + \
+                                   kpis_por_posicao.get('Goleiro', {}).get('Posse', [])
                 else:
-                        # Combina métricas de TODAS as posições de linha
-                        metricas_sim = []
-                        for pos, kpis in kpis_por_posicao.items():
-                            if pos != 'Goleiro':
-                                for grupo_metrica in kpis.values():
-                                    metricas_sim.extend(grupo_metrica)
+                    # Combina métricas de TODAS as posições de linha para uma busca universal.
+                    metricas_sim = []
+                    for pos, kpis in kpis_por_posicao.items():
+                        if pos != 'Goleiro':
+                            for grupo_metrica in kpis.values():
+                                metricas_sim.extend(grupo_metrica)
                 
+                # Filtra as métricas de comparação para incluir apenas as que estão na base.
                 metricas_sim = list(set([m for m in metricas_sim if m in df.columns]))
-    
+        
                 if not metricas_sim:
                     st.warning("Nenhuma métrica de comparação válida encontrada para o tipo de jogador. Verifique as colunas.")
                     can_proceed = False
                 else:
                     can_proceed = True
-    
-    
+        
+                
                 if can_proceed:
                     
                     # --- 2. Filtrar Pool de Busca (Segmentado por Tipo) ---
-                    # df_calculo já é único, então pool_busca também será
                     pool_busca = df_calculo.copy()
+                    # Remove o próprio jogador de referência do pool de busca.
                     pool_busca = pool_busca[pool_busca['Chave_Unica'] != jogador_referencia_chave]
                     
+                    # Filtra o pool para incluir apenas jogadores do mesmo tipo (Goleiro ou Linha).
                     if tipo_jogador == 'Goleiro':
                         pool_busca = pool_busca[pool_busca['Posição'] == 'Goleiro'].copy()
                     else:
@@ -424,8 +449,8 @@ if uploaded_file is not None:
                         can_proceed = False
                     
                     if can_proceed:
-                        # 3. Preparar os dados
-                        # df_sim agora terá um índice único
+                        # 3. Preparar os dados para cálculo.
+                        # Normalização: Padroniza as métricas (média 0, desvio padrão 1) para que métricas com grandes valores não dominem a similaridade.
                         df_sim = pool_busca[['Chave_Unica'] + metricas_sim].set_index('Chave_Unica').fillna(0)
                         ref_data = ref_player_data_row[metricas_sim].fillna(0).iloc[0].to_frame().T
                         
@@ -434,27 +459,23 @@ if uploaded_file is not None:
                         if len(df_sim) > 1:
                             df_sim_scaled = scaler_sim.fit_transform(df_sim)
                             df_sim_scaled = pd.DataFrame(df_sim_scaled, columns=metricas_sim, index=df_sim.index)
+                            # Transforma os dados do jogador de referência usando o mesmo scaler.
                             ref_vector_scaled = scaler_sim.transform(ref_data).reshape(1, -1)
                         else:
                             st.info("Pool de busca pequeno. O cálculo será feito sem normalização.")
                             df_sim_scaled = df_sim
                             ref_vector_scaled = ref_data.values.reshape(1, -1)
                             
-                        # 4. Calcular Similaridade
+                        # 4. Calcular Similaridade (Cosseno)
+                        # A similaridade do cosseno mede o ângulo entre dois vetores de características.
                         similarity_scores = cosine_similarity(ref_vector_scaled, df_sim_scaled)
                         
                         # 5. Criar DataFrame de Resultados
-                        # df_results agora terá um índice único
                         df_results = pd.DataFrame(similarity_scores.T, index=df_sim_scaled.index, columns=['Similaridade'])
                         
-                        
-                        # --- CORREÇÃO DO BUG DE 100% ---
-                        # O score de similaridade (cosine) para vetores positivos vai de 0 a 1.
-                        # Apenas multiplicamos por 100 para ter a porcentagem REAL.
-                        
+                        # Converte o valor do cosseno (0 a 1) para porcentagem (0% a 100%).
                         df_results['Similaridade'] = df_results['Similaridade'] * 100
-                        # Garante que não passe de 100 (por segurança de float)
-                        df_results['Similaridade'] = df_results['Similaridade'].clip(0, 100) 
+                        df_results['Similaridade'] = df_results['Similaridade'].clip(0, 100) # Limita por segurança
 
                         
                         df_results = df_results.sort_values(by='Similaridade', ascending=False)
@@ -463,10 +484,10 @@ if uploaded_file is not None:
                         top_similares_chaves = df_results.head(5).index.tolist()
                         st.subheader(f"Top 5 Jogadores Mais Similares a: **{jogador_referencia}** (Busca {tipo_jogador})")
                         
-                        # df_calculo já é único
+                        # Junta a similaridade com os dados originais do jogador.
                         df_display = df_calculo[df_calculo['Chave_Unica'].isin(top_similares_chaves)].set_index('Chave_Unica')
                         
-                        # Esta linha agora vai funcionar sem erros
+                        # Reordena para exibir na ordem do mais similar para o menos.
                         df_display = df_display.reindex(top_similares_chaves)
                         
                         df_display = df_display.join(df_results, how='left')
@@ -474,6 +495,7 @@ if uploaded_file is not None:
                         display_cols = ['Jogador', 'Equipa', 'Idade', 'Posição', 'Similaridade', 'Minutos jogados:']
                         df_display = df_display[[col for col in display_cols if col in df_display.columns]].round(2)
                         
+                        # Exibe a tabela com a barra de progresso para o score de similaridade.
                         st.dataframe(df_display, 
                                      column_config={"Similaridade": st.column_config.ProgressColumn(
                                          "Similaridade (%)", 
@@ -481,7 +503,3 @@ if uploaded_file is not None:
                                          min_value=0, 
                                          max_value=100
                                      )})
-
-                        # ---------------------------------------------------
-                        # (REMOVIDO) 7. GRÁFICO SCATTER 
-                        # ---------------------------------------------------
