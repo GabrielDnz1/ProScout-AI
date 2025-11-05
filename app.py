@@ -10,6 +10,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 st.set_page_config(layout="wide")
 st.title("PROScout AI")
 
+# --- NOVO LINK DE DOWNLOAD ADICIONADO AQUI ---
+st.markdown("🔗 **Baixe o arquivo modelo - Todos os Jogadores do brasileirão com mais de 500 minutos (Wyscout CSV):** [Modelo de Base de Dados](https://drive.google.com/file/d/1ohP0Jfv0Sx3C5ILwvSXuOTXEUGGiMHNq/view?usp=sharing)")
+# ---------------------------------------------
+
 uploaded_file = st.file_uploader("📂 Carregue um arquivo CSV ou XLSX", type=["csv", "xlsx"])
 page = st.sidebar.radio("Selecione a Ferramenta AI", ["Análise de Estilos", "Jogador Similar"]) 
 
@@ -327,7 +331,7 @@ if uploaded_file is not None:
     # PÁGINA 2: PROSCOUT AI (JOGADOR SIMILAR) - UNIVERSAL E ROBUSTA
     # =======================================================
     if page == "Jogador Similar":
-        st.header("🔍 Encontre Jogadores Similares (Similaridade do Cosseno)")
+        st.header("🔍 Encontre Jogadores Similares (AI Similarity - Busca Universal Segmentada)")
         
         # --- 0. Preparação e Criação de Chave Única ---
         chave_unica_disponivel = False
